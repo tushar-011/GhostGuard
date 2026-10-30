@@ -1,16 +1,5 @@
-# Secrets & Env
-.env
-*.env
-client_secret*.json
-credentials.json
-
-# Dependencies
 node_modules/
-target/
-__pycache__/
-venv/
-
-# IDE files
-.idea/
-.vscode/
-*.iml
+.env
+*.log
+.DS_Store
+data/audit_store.json

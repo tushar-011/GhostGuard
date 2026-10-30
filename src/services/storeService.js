@@ -10,7 +10,9 @@ const ALLOWED_STATUSES = [
   'KEPT',
   'SECURED',
   'MARKED_FOR_DELETION',
-  'REVOKED'
+  'REVOKED',
+  'REMOVE_RECORD',
+  'DELETE_RECORD'
 ];
 
 /**
@@ -126,10 +128,50 @@ async function getAccountsMap() {
 }
 
 /**
+ * Permanently removes an account matching domain or serviceName from audit_store.json
+ * @param {string} domain
+ * @returns {Promise<{ removedDomain: string, remainingCount: number }>}
+ */
+async function removeAccount(domain) {
+  if (!domain) {
+    throw new Error('Domain is required to remove an account.');
+  }
+
+  const store = await readStore();
+  const domainKey = domain.toLowerCase().trim();
+
+  let matchedKey = null;
+  if (store.accounts[domainKey]) {
+    matchedKey = domainKey;
+  } else {
+    for (const key of Object.keys(store.accounts)) {
+      if (
+        key === domainKey ||
+        (store.accounts[key].serviceName && store.accounts[key].serviceName.toLowerCase() === domainKey) ||
+        (store.accounts[key].domain && store.accounts[key].domain.toLowerCase() === domainKey)
+      ) {
+        matchedKey = key;
+        break;
+      }
+    }
+  }
+
+  if (matchedKey) {
+    delete store.accounts[matchedKey];
+    await writeStore(store);
+  }
+
+  return {
+    removedDomain: domain,
+    remainingCount: Object.keys(store.accounts).length
+  };
+}
+
+/**
  * Updates an account's user action status and optional notes
  *
  * @param {string} domain - Domain key of the account
- * @param {'UNREVIEWED' | 'KEPT' | 'SECURED' | 'MARKED_FOR_DELETION' | 'REVOKED'} status
+ * @param {'UNREVIEWED' | 'KEPT' | 'SECURED' | 'MARKED_FOR_DELETION' | 'REVOKED' | 'REMOVE_RECORD'} status
  * @param {string} [notes='']
  * @returns {Promise<object>} The updated account object
  */
@@ -138,9 +180,20 @@ async function updateAccountStatus(domain, status, notes = '') {
     throw new Error('Domain is required to update account status.');
   }
 
-  const cleanStatus = (status || '').toUpperCase().trim();
+  let cleanStatus = (status || '').toUpperCase().trim();
+  if (cleanStatus === 'KEEP') cleanStatus = 'KEPT';
+  if (cleanStatus === 'SECURE') cleanStatus = 'SECURED';
+  if (cleanStatus === 'REVOKE') cleanStatus = 'REVOKED';
+  if (cleanStatus === 'DELETE') cleanStatus = 'MARKED_FOR_DELETION';
+
   if (!ALLOWED_STATUSES.includes(cleanStatus)) {
     throw new Error(`Invalid status "${status}". Allowed values: ${ALLOWED_STATUSES.join(', ')}`);
+  }
+
+  // Handle permanent deletion via updateAccountStatus
+  if (cleanStatus === 'REMOVE_RECORD' || cleanStatus === 'DELETE_RECORD') {
+    const removal = await removeAccount(domain);
+    return { domain, status: 'REMOVED', removed: true, remainingCount: removal.remainingCount };
   }
 
   const store = await readStore();
@@ -181,6 +234,7 @@ module.exports = {
   getAccounts,
   getAccountsMap,
   updateAccountStatus,
+  removeAccount,
   clearStore
 };
 

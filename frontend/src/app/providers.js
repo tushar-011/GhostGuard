@@ -1,15 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { GhostGuardLoader, ThemeProvider } from "@/components/ghostguard";
+import { GhostGuardLoader, ThemeProvider, GhostGuardProvider } from "@/components/ghostguard";
 
 export default function Providers({ children }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setReady(true), 900);
+    const isLive = typeof window !== "undefined" && (
+      new URLSearchParams(window.location.search).get("auth") === "success" ||
+      window.localStorage.getItem("ghostguard_auth") === "true" ||
+      window.localStorage.getItem("ghostguard_mode") === "LIVE"
+    );
+    if (isLive) {
+      setReady(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setReady(true), 300);
     return () => window.clearTimeout(timer);
   }, []);
 
-  return <ThemeProvider>{ready ? children : <GhostGuardLoader />}</ThemeProvider>;
+  return (
+    <ThemeProvider>
+      <GhostGuardProvider>
+        {ready ? children : <GhostGuardLoader />}
+      </GhostGuardProvider>
+    </ThemeProvider>
+  );
 }

@@ -94,6 +94,18 @@ router.get('/scan', async (req, res) => {
       rawEmails = getMockRawEmails();
     } else {
       if (!oauth2Client.credentials || !oauth2Client.credentials.access_token) {
+        // Fallback: If we already have stored audited accounts from a previous scan, return them!
+        const existingStored = await storeService.getAccounts();
+        if (existingStored && existingStored.length > 0) {
+          console.log(`[Audit] Active tokens not in memory, returning ${existingStored.length} stored accounts.`);
+          return res.json({
+            success: true,
+            mode: 'store',
+            count: existingStored.length,
+            assets: existingStored
+          });
+        }
+
         return res.status(401).json({
           success: false,
           error: 'User not authenticated. Please log in via /auth/google first.',
@@ -125,6 +137,36 @@ router.get('/scan', async (req, res) => {
     });
   } catch (error) {
     console.error('Audit scan failed:', error);
+    // If Gmail API call failed due to invalid credentials, check if we have stored accounts
+    try {
+      const existing = await storeService.getAccounts();
+      if (existing && existing.length > 0) {
+        return res.json({
+          success: true,
+          mode: 'store-fallback',
+          count: existing.length,
+          assets: existing
+        });
+      }
+    } catch {}
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 1b. GET /api/audit/accounts
+ * Returns all saved audited accounts directly from state store.
+ */
+router.get('/accounts', async (req, res) => {
+  try {
+    const accounts = await storeService.getAccounts();
+    res.json({
+      success: true,
+      count: accounts.length,
+      assets: accounts
+    });
+  } catch (error) {
+    console.error('Failed to get stored accounts:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -159,8 +201,76 @@ router.get('/graph', async (req, res) => {
 });
 
 /**
+ * Helper to compute high-level audit statistics across stored accounts
+ */
+function computeAuditStats(accounts = []) {
+  const totalDiscovered = accounts.length;
+
+  let dormantCount = 0;
+  let highRiskCount = 0;
+  let reviewedCount = 0;
+  let totalGhostScore = 0;
+
+  const riskBreakdown = { High: 0, Medium: 0, Low: 0 };
+  const statusBreakdown = {
+    UNREVIEWED: 0,
+    KEPT: 0,
+    SECURED: 0,
+    MARKED_FOR_DELETION: 0,
+    REVOKED: 0
+  };
+  const categoryBreakdown = {};
+
+  for (const account of accounts) {
+    if (typeof account.ghostScore === 'number') {
+      totalGhostScore += account.ghostScore;
+    }
+
+    // Dormant count
+    if (account.isDormant || (account.ageInMonths && account.ageInMonths >= 12)) {
+      dormantCount++;
+    }
+
+    // Risk count
+    const risk = account.riskLevel || 'Low';
+    if (risk === 'High') highRiskCount++;
+    if (riskBreakdown[risk] !== undefined) {
+      riskBreakdown[risk]++;
+    }
+
+    // Status count
+    const status = account.status || 'UNREVIEWED';
+    if (status !== 'UNREVIEWED') {
+      reviewedCount++;
+    }
+    if (statusBreakdown[status] !== undefined) {
+      statusBreakdown[status]++;
+    } else {
+      statusBreakdown[status] = 1;
+    }
+
+    // Category breakdown
+    const cat = account.category || 'General Service';
+    categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
+  }
+
+  const avgGhostScore = totalDiscovered > 0 ? Math.round(totalGhostScore / totalDiscovered) : 0;
+
+  return {
+    totalDiscovered,
+    dormantCount,
+    highRiskCount,
+    reviewedCount,
+    ghostScore: avgGhostScore,
+    riskBreakdown,
+    statusBreakdown,
+    categoryBreakdown
+  };
+}
+
+/**
  * 3. POST /api/audit/action
- * Updates an audited account's user action state (e.g. KEPT, SECURED, MARKED_FOR_DELETION, REVOKED).
+ * Updates an audited account's user action state (e.g. KEPT, SECURED, MARKED_FOR_DELETION, REVOKED, REMOVE_RECORD).
  * Request body: { domain: string, action: string, notes?: string }
  */
 router.post('/action', async (req, res) => {
@@ -181,17 +291,67 @@ router.post('/action', async (req, res) => {
       });
     }
 
+    const cleanAction = action.toUpperCase().trim();
+
+    // Handle permanent asset removal
+    if (cleanAction === 'REMOVE_RECORD' || cleanAction === 'DELETE_RECORD') {
+      await storeService.removeAccount(domain);
+      const remainingAccounts = await storeService.getAccounts();
+      const updatedStats = computeAuditStats(remainingAccounts);
+
+      return res.json({
+        success: true,
+        removedDomain: domain,
+        message: `Account record for "${domain}" permanently removed from audit store.`,
+        stats: updatedStats
+      });
+    }
+
     const updatedAccount = await storeService.updateAccountStatus(domain, action, notes);
+    const remainingAccounts = await storeService.getAccounts();
+    const updatedStats = computeAuditStats(remainingAccounts);
 
     res.json({
       success: true,
       message: `Account status for "${domain}" successfully updated to "${action}".`,
-      account: updatedAccount
+      account: updatedAccount,
+      stats: updatedStats
     });
   } catch (error) {
     console.error('Updating account status failed:', error.message);
     const statusCode = error.message.includes('not found') ? 404 : 400;
     res.status(statusCode).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * 3b. DELETE /api/audit/asset/:domain
+ * Permanently removes an asset record from audit_store.json
+ */
+router.delete('/asset/:domain', async (req, res) => {
+  try {
+    const { domain } = req.params;
+
+    if (!domain) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing domain in delete request.'
+      });
+    }
+
+    await storeService.removeAccount(domain);
+    const remainingAccounts = await storeService.getAccounts();
+    const updatedStats = computeAuditStats(remainingAccounts);
+
+    res.json({
+      success: true,
+      removedDomain: domain,
+      message: `Account record for "${domain}" successfully deleted.`,
+      stats: updatedStats
+    });
+  } catch (error) {
+    console.error('Deleting asset failed:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -212,62 +372,11 @@ router.get('/stats', async (req, res) => {
       accounts = await storeService.saveAccounts(scored);
     }
 
-    const totalDiscovered = accounts.length;
-
-    let dormantCount = 0;
-    let highRiskCount = 0;
-    let reviewedCount = 0;
-
-    const riskBreakdown = { High: 0, Medium: 0, Low: 0 };
-    const statusBreakdown = {
-      UNREVIEWED: 0,
-      KEPT: 0,
-      SECURED: 0,
-      MARKED_FOR_DELETION: 0,
-      REVOKED: 0
-    };
-    const categoryBreakdown = {};
-
-    for (const account of accounts) {
-      // Dormant count
-      if (account.isDormant || (account.ageInMonths && account.ageInMonths >= 12)) {
-        dormantCount++;
-      }
-
-      // Risk count
-      const risk = account.riskLevel || 'Low';
-      if (risk === 'High') highRiskCount++;
-      if (riskBreakdown[risk] !== undefined) {
-        riskBreakdown[risk]++;
-      }
-
-      // Status count
-      const status = account.status || 'UNREVIEWED';
-      if (status !== 'UNREVIEWED') {
-        reviewedCount++;
-      }
-      if (statusBreakdown[status] !== undefined) {
-        statusBreakdown[status]++;
-      } else {
-        statusBreakdown[status] = 1;
-      }
-
-      // Category breakdown
-      const cat = account.category || 'General Service';
-      categoryBreakdown[cat] = (categoryBreakdown[cat] || 0) + 1;
-    }
+    const stats = computeAuditStats(accounts);
 
     res.json({
       success: true,
-      stats: {
-        totalDiscovered,
-        dormantCount,
-        highRiskCount,
-        reviewedCount,
-        riskBreakdown,
-        statusBreakdown,
-        categoryBreakdown
-      }
+      stats
     });
   } catch (error) {
     console.error('Failed to compute audit statistics:', error);

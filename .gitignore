@@ -3,3 +3,11 @@ node_modules/
 *.log
 .DS_Store
 data/audit_store.json
+
+# Next.js frontend
+frontend/.next/
+frontend/out/
+
+# Frontend environment files
+frontend/.env*
+!frontend/.env.example

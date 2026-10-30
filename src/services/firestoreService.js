@@ -368,6 +368,97 @@ async function getUserAuditStats(uid) {
   };
 }
 
+/**
+ * 7. Saves connected third-party account credentials (e.g. Gmail OAuth tokens)
+ * under users/{uid}/connectedAccounts/{provider}
+ *
+ * @param {string} uid
+ * @param {string} provider - e.g. 'gmail'
+ * @param {object} accountData
+ * @returns {Promise<object>}
+ */
+async function saveUserConnectedAccount(uid, provider = 'gmail', accountData = {}) {
+  assertFirebase();
+  if (!uid) throw new Error('User UID is required.');
+
+  const now = new Date().toISOString();
+  const accountRef = db
+    .collection('users')
+    .doc(uid)
+    .collection('connectedAccounts')
+    .doc(provider);
+
+  const payload = {
+    provider,
+    connectedAt: accountData.connectedAt || now,
+    updatedAt: now,
+    ...accountData,
+  };
+
+  await accountRef.set(payload, { merge: true });
+
+  // Also log the connection event in auditLogs
+  try {
+    const logId = `log_${Date.now()}_connect_${provider}`;
+    await db
+      .collection('users')
+      .doc(uid)
+      .collection('auditLogs')
+      .doc(logId)
+      .set({
+        logId,
+        action: 'ACCOUNT_CONNECTED',
+        targetId: provider,
+        result: 'SUCCESS',
+        email: accountData.connectedEmail || '',
+        timestamp: now,
+      });
+  } catch (logErr) {
+    console.warn('[Firestore] Failed to log account connection:', logErr.message);
+  }
+
+  return payload;
+}
+
+/**
+ * 8. Retrieves connected account credentials for a user from users/{uid}/connectedAccounts/{provider}
+ * @param {string} uid
+ * @param {string} provider - e.g. 'gmail'
+ * @returns {Promise<object|null>}
+ */
+async function getUserConnectedAccount(uid, provider = 'gmail') {
+  assertFirebase();
+  if (!uid) throw new Error('User UID is required.');
+
+  const doc = await db
+    .collection('users')
+    .doc(uid)
+    .collection('connectedAccounts')
+    .doc(provider)
+    .get();
+
+  if (!doc.exists) return null;
+  return doc.data();
+}
+
+/**
+ * 9. Checks if a user has a connected Gmail account
+ * @param {string} uid
+ * @returns {Promise<boolean>}
+ */
+async function hasUserConnectedGmail(uid) {
+  if (!isConfigured() || !db || !uid) return false;
+  try {
+    const account = await getUserConnectedAccount(uid, 'gmail');
+    return Boolean(
+      account &&
+      (account.tokens || account.accessToken || account.refreshToken)
+    );
+  } catch {
+    return false;
+  }
+}
+
 module.exports = {
   sanitizeDocId,
   upsertUserProfile,
@@ -376,5 +467,8 @@ module.exports = {
   updateThreatAction,
   removeThreatRecord,
   getUserAuditStats,
+  saveUserConnectedAccount,
+  getUserConnectedAccount,
+  hasUserConnectedGmail,
 };
 

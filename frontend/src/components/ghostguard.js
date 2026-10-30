@@ -648,46 +648,11 @@ export function AuthPage({ mode = "login" }) {
   const router = useRouter();
   const { login: firebaseLogin, signup: firebaseSignup, loginWithGoogle } = useAuth();
 
-  const handleGoogleSignIn = async () => {
+  const handleGoogleSignIn = () => {
     setError("");
     setSubmitting(true);
-    try {
-      if (loginWithGoogle) {
-        const user = await loginWithGoogle();
-        if (user) {
-          const email = user.email || "";
-          const name = user.displayName || "";
-          try {
-            await authApi.updateProfile({ displayName: name, email });
-          } catch {}
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem("ghostguard_auth", "true");
-            window.localStorage.setItem("ghostguard_mode", "LIVE");
-            if (email) window.localStorage.setItem("ghostguard_email", email);
-            window.localStorage.setItem(
-              "ghostguard-demo-session",
-              JSON.stringify({
-                authenticated: true,
-                isLive: true,
-                email,
-                name,
-                createdAt: Date.now()
-              })
-            );
-          }
-          router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
-          return;
-        }
-      }
-    } catch (googleErr) {
-      console.warn("Firebase Google popup issue, falling back to OAuth redirect:", googleErr.message);
-      if (googleErr.code === "auth/popup-closed-by-user") {
-        setSubmitting(false);
-        return;
-      }
-    }
-    // Fallback to backend Google OAuth redirect
-    handleGoogleLogin();
+    // Direct 1-click Google OAuth flow: provides identity AND grants Gmail inbox read scope
+    window.location.href = `${API_BASE_URL}/auth/google`;
   };
 
   async function submit(event) {
@@ -727,9 +692,10 @@ export function AuthPage({ mode = "login" }) {
       }
 
       if (login) {
+        let user = null;
         try {
           if (firebaseLogin) {
-            await firebaseLogin(email, password);
+            user = await firebaseLogin(email, password);
           }
         } catch (fbErr) {
           // Check local demo registration fallback
@@ -754,6 +720,8 @@ export function AuthPage({ mode = "login" }) {
           return;
         }
 
+        const uid = user?.uid || user?.user?.uid || auth?.currentUser?.uid || '';
+
         if (typeof window !== "undefined") {
           window.localStorage.setItem("ghostguard_auth", "true");
           window.localStorage.setItem("ghostguard_mode", "LIVE");
@@ -768,14 +736,29 @@ export function AuthPage({ mode = "login" }) {
             })
           );
         }
+
+        // Inspect backend session / Firestore to verify connected Gmail token
+        try {
+          const status = await authApi.checkStatus();
+          if (!status?.hasGmail && !status?.connectedGmail) {
+            window.location.href = `${API_BASE_URL}/auth/google?uid=${encodeURIComponent(uid)}`;
+            return;
+          }
+        } catch (statusErr) {
+          console.warn("Status check error during login:", statusErr.message);
+        }
+
         router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
         return;
       }
 
       // Registration / Signup
+      let user = null;
+      let uid = "";
       try {
         if (firebaseSignup) {
-          await firebaseSignup(email, password);
+          user = await firebaseSignup(email, password);
+          uid = user?.uid || user?.user?.uid || auth?.currentUser?.uid || '';
         }
       } catch (fbErr) {
         let msg = fbErr.message || "Failed to create account.";
@@ -818,12 +801,15 @@ export function AuthPage({ mode = "login" }) {
         );
       }
 
-      router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
+      // Mandatory Gmail Connection Bridge: Redirect to Google OAuth with Firebase UID
+      window.location.href = `${API_BASE_URL}/auth/google?uid=${encodeURIComponent(uid)}`;
+      return;
     } catch (err) {
       setError(err.message || "An unexpected error occurred.");
       setSubmitting(false);
     }
   }
+
   const title = forgot ? "Reset your password" : login ? "Log in to your workspace" : "Create your GhostGuard account";
   const eyebrow = forgot ? "Account recovery" : login ? "Welcome back" : "Start with clarity";
   return <PublicShell><section className="auth-page auth-page-form-only"><div className="auth-form-wrap"><div className="auth-form"><div className="mobile-auth-logo"><Logo /></div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p className="auth-subtitle">{forgot ? "Enter your email to receive recovery instructions." : login ? "Log in to access your digital security workspace." : "Create your account to start auditing and securing your digital footprint."}</p>{submitted ? <div className="success-panel"><span className="success-icon"><Check /></span><h3>{forgot ? "Recovery instructions sent" : "Account ready"}</h3><p>{forgot ? "Check your email for instructions to reset your password." : "Your account is ready. Log in to continue to the dashboard."}</p><Link href="/login" className="button button-primary">{forgot ? "Return to login" : "Continue to login"} <ArrowRight size={16} /></Link></div> : <>
@@ -831,34 +817,50 @@ export function AuthPage({ mode = "login" }) {
     <>
       <button
         type="button"
-        className="button button-google button-full"
+        className="button button-primary button-full google-prominent-btn"
         onClick={handleGoogleSignIn}
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          gap: "10px",
-          background: "var(--surface-strong)",
-          border: "1px solid var(--line-strong)",
-          color: "var(--foreground)",
-          padding: "12px 16px",
-          borderRadius: "10px",
-          fontSize: "14px",
+          gap: "12px",
+          background: "linear-gradient(135deg, rgba(74, 222, 128, 0.22) 0%, rgba(16, 185, 129, 0.3) 100%)",
+          border: "1px solid rgba(74, 222, 128, 0.45)",
+          color: "#f1f5ee",
+          padding: "14px 20px",
+          borderRadius: "12px",
+          fontSize: "15px",
           fontWeight: "600",
           cursor: "pointer",
-          marginBottom: "16px",
+          marginBottom: "6px",
           width: "100%",
-          boxShadow: "0 2px 8px rgba(0,0,0,0.15)"
+          boxShadow: "0 4px 20px rgba(16, 185, 129, 0.22)",
+          transition: "all 0.2s ease"
         }}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24">
+        <svg width="20" height="20" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
           <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.34 24 12 24z"/>
           <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
           <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.93 6.72-4.93z"/>
         </svg>
-        {login ? "Sign in with Google" : "Connect with Google"}
+        <span>{login ? "Sign in with Google" : "Connect with Google"}</span>
+        <span style={{
+          fontSize: "11px",
+          padding: "3px 8px",
+          borderRadius: "999px",
+          background: "rgba(74, 222, 128, 0.25)",
+          border: "1px solid rgba(74, 222, 128, 0.4)",
+          color: "#4ade80",
+          fontWeight: "600",
+          letterSpacing: "0.03em"
+        }}>
+          Recommended
+        </span>
       </button>
+      <div style={{ textAlign: "center", fontSize: "11.5px", color: "#8ea890", marginBottom: "16px" }}>
+        ✦ 1-click authentication & automatic inbox asset discovery
+      </div>
       <div style={{ display: "flex", alignItems: "center", gap: "10px", margin: "14px 0 18px", color: "var(--muted)", fontSize: "12px" }}>
         <span style={{ flex: 1, height: "1px", background: "var(--line)" }} />
         <span>or continue with email</span>
@@ -866,7 +868,21 @@ export function AuthPage({ mode = "login" }) {
       </div>
     </>
   )}
-  <form onSubmit={submit} noValidate>{!login && !forgot && <label>Full name<input name="name" placeholder="Alex Morgan" /></label>}<label>Email address<input name="email" type="email" placeholder="you@example.com" required /></label>{!forgot && <label>Password<div className="password-input"><input name="password" type={showPassword ? "text" : "password"} placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>}{!login && !forgot && <label>Confirm password<input name="confirm" type={showPassword ? "text" : "password"} placeholder="••••••••" required /></label>}{login ? <div className="form-row"><label className="checkbox"><input type="checkbox" name="remember" /> <span>Remember me</span></label><Link href="/forgot-password">Forgot password?</Link></div> : !forgot && <label className="checkbox"><input type="checkbox" required name="terms" /> <span>I agree to the <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>.</span></label>}{error && <p className="form-error">{error}</p>}<button className="button button-primary button-full" type="submit" disabled={submitting}>{submitting ? <><GhostGuardLoader inline /> Processing...</> : <>{forgot ? "Send recovery email" : login ? "Log in" : "Create account"} <ArrowRight size={16} /></>}</button></form></>}<p className="auth-switch">{forgot ? "Remembered your password?" : login ? "New to GhostGuard?" : "Already have an account?"} <Link href={forgot || !login ? "/login" : "/signup"}>{forgot || !login ? "Log in" : "Create an account"}</Link></p></div></div></section></PublicShell>;
+  <form onSubmit={submit} noValidate>{!login && !forgot && <label>Full name<input name="name" placeholder="Alex Morgan" /></label>}<label>Email address<input name="email" type="email" placeholder="you@example.com" required /></label>{!forgot && <label>Password<div className="password-input"><input name="password" type={showPassword ? "text" : "password"} placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>}{!login && !forgot && <label>Confirm password<input name="confirm" type={showPassword ? "text" : "password"} placeholder="••••••••" required /></label>}{login ? <div className="form-row"><label className="checkbox"><input type="checkbox" name="remember" /> <span>Remember me</span></label><Link href="/forgot-password">Forgot password?</Link></div> : !forgot && <label className="checkbox"><input type="checkbox" required name="terms" /> <span>I agree to the <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>.</span></label>}{error && <p className="form-error">{error}</p>}<button className="button button-ghost button-full" type="submit" disabled={submitting} style={{ border: "1px solid rgba(74, 222, 128, 0.3)" }}>{submitting ? <><GhostGuardLoader inline /> Processing...</> : <>{forgot ? "Send recovery email" : login ? "Log in with email" : "Create account with email"} <ArrowRight size={16} /></>}</button>{!forgot && (
+    <div style={{
+      marginTop: "14px",
+      padding: "10px 14px",
+      borderRadius: "8px",
+      background: "rgba(74, 222, 128, 0.05)",
+      border: "1px dashed rgba(74, 222, 128, 0.2)",
+      fontSize: "12px",
+      color: "#9bb89e",
+      lineHeight: "1.5",
+      textAlign: "center"
+    }}>
+      Signing up with email will prompt you to connect your Gmail account on the next step to enable inbox asset discovery.
+    </div>
+  )}</form></>}<p className="auth-switch">{forgot ? "Remembered your password?" : login ? "New to GhostGuard?" : "Already have an account?"} <Link href={forgot || !login ? "/login" : "/signup"}>{forgot || !login ? "Log in" : "Create an account"}</Link></p></div></div></section></PublicShell>;
 }
 
 export function PageHero({ eyebrow, title, copy }) {
@@ -1730,17 +1746,66 @@ export function DashboardPage() {
     <DashboardShell title="Overview" description="Real-time audit and posture of your digital identity.">
       {!isLiveEffective && <DemoBanner />}
 
-      {sessionExpired && (
-        <div style={{ background: "rgba(239, 68, 68, 0.12)", border: "1px solid rgba(239, 68, 68, 0.35)", borderRadius: "12px", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <ShieldCheck size={26} style={{ color: "#f87171" }} />
+      {/* Dashboard Fallback Guard: Prompt user to connect Gmail inbox if unlinked, empty, or expired */}
+      {(sessionExpired || (!loading && isLiveEffective && (totalCount === 0 || (!stats?.hasGmail && !stats?.connectedGmail)))) && (
+        <div style={{
+          background: "linear-gradient(135deg, rgba(20, 36, 26, 0.96) 0%, rgba(14, 26, 19, 0.96) 100%)",
+          border: "1px solid rgba(74, 222, 128, 0.35)",
+          borderRadius: "14px",
+          padding: "18px 24px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: "24px",
+          flexWrap: "wrap",
+          gap: "16px",
+          boxShadow: "0 6px 24px rgba(0, 0, 0, 0.35)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+            <div style={{
+              width: "46px",
+              height: "46px",
+              borderRadius: "12px",
+              background: "rgba(74, 222, 128, 0.15)",
+              border: "1px solid rgba(74, 222, 128, 0.3)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "#4ade80",
+              flexShrink: 0
+            }}>
+              <Mail size={22} />
+            </div>
             <div>
-              <strong style={{ display: "block", color: "#f8fafc", fontSize: "14px" }}>Backend session expired</strong>
-              <span style={{ color: "#94a3b8", fontSize: "12px" }}>Please reconnect your Gmail to refresh active API access.</span>
+              <strong style={{ display: "block", color: "#f1f5ee", fontSize: "14.5px", fontWeight: "600", marginBottom: "4px" }}>
+                Connect your Gmail inbox to discover orphaned accounts and generate your digital footprint.
+              </strong>
+              <span style={{ color: "#9bb89e", fontSize: "12.5px" }}>
+                GhostGuard performs a secure, read-only audit across account confirmation emails to map active services and compute risk telemetry.
+              </span>
             </div>
           </div>
-          <button onClick={handleGoogleLogin} className="button button-primary" style={{ padding: "8px 18px", fontSize: "13px" }}>
-            Reconnect Gmail
+          <button
+            onClick={() => {
+              const currentUid = auth?.currentUser?.uid || '';
+              window.location.href = `${API_BASE_URL}/auth/google${currentUid ? `?uid=${encodeURIComponent(currentUid)}` : ''}`;
+            }}
+            className="button button-primary"
+            style={{
+              padding: "10px 20px",
+              fontSize: "13.5px",
+              fontWeight: "600",
+              whiteSpace: "nowrap",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              borderRadius: "10px",
+              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+              color: "#0a1f14",
+              boxShadow: "0 2px 12px rgba(16, 185, 129, 0.35)"
+            }}
+          >
+            ✦ Connect Gmail Inbox
           </button>
         </div>
       )}

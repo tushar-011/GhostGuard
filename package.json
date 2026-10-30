@@ -9,6 +9,7 @@
     "test": "node test/test-parser.js && node test/test-risk-store-graph.js && node test/test-firebase-scaffolding.js",
     "test:firebase": "node test/test-firebase-scaffolding.js",
     "test:persistence": "node test/test-firebase-persistence.js",
+    "test:bridge": "node test/test-gmail-bridge.js",
     "test:integration": "node test/test-integration.js"
   },
   "keywords": [

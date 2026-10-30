@@ -118,6 +118,20 @@ router.get('/scan', async (req, res) => {
       }
 
       if (!oauth2Client.credentials || !oauth2Client.credentials.access_token) {
+        if (isCloudActive(req)) {
+          try {
+            const connectedAccount = await firestoreService.getUserConnectedAccount(req.user.uid, 'gmail');
+            if (connectedAccount && connectedAccount.tokens) {
+              oauth2Client.setCredentials(connectedAccount.tokens);
+              console.log(`[Audit] Restored Gmail OAuth credentials from Firestore for UID: ${req.user.uid}`);
+            }
+          } catch (restoreErr) {
+            console.warn('[Audit] Failed restoring Gmail tokens from Firestore:', restoreErr.message);
+          }
+        }
+      }
+
+      if (!oauth2Client.credentials || !oauth2Client.credentials.access_token) {
         // Fallback: If we already have stored audited accounts from a previous scan, return them!
         const existingStored = await storeService.getAccounts();
         if (existingStored && existingStored.length > 0) {
@@ -130,10 +144,12 @@ router.get('/scan', async (req, res) => {
           });
         }
 
+        const targetUid = req.user && !req.user.isLocal ? req.user.uid : '';
         return res.status(401).json({
           success: false,
-          error: 'User not authenticated. Please log in via /auth/google first.',
-          authUrl: '/auth/google',
+          needsGmailAuth: true,
+          error: 'User not authenticated with Gmail. Please connect your Gmail inbox to discover accounts.',
+          authUrl: `/auth/google${targetUid ? `?uid=${encodeURIComponent(targetUid)}` : ''}`,
           tip: 'Use /api/audit/scan?mock=true to run in demo mode without Google login.'
         });
       }
@@ -550,8 +566,20 @@ router.get('/stats', async (req, res) => {
 
     const stats = computeAuditStats(accounts);
 
+    let hasConnectedGmail = Boolean(
+      oauth2Client.credentials &&
+      (oauth2Client.credentials.access_token || oauth2Client.credentials.refresh_token)
+    );
+    if (!hasConnectedGmail && isCloudActive(req)) {
+      try {
+        hasConnectedGmail = await firestoreService.hasUserConnectedGmail(req.user.uid);
+      } catch {}
+    }
+
     res.json({
       success: true,
+      hasGmail: hasConnectedGmail,
+      connectedGmail: hasConnectedGmail,
       totalDiscovered: stats.totalDiscovered,
       highRiskCount: stats.highRiskCount,
       dormantCount: stats.dormantCount,

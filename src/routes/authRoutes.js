@@ -28,20 +28,39 @@ try {
 
 // 1. Send user to Google's consent screen
 router.get('/google', (req, res) => {
-  const authUrl = oauth2Client.generateAuthUrl({
+  const uid = req.query.uid || (req.user && !req.user.isLocal ? req.user.uid : '');
+  const statePayload = uid ? JSON.stringify({ uid }) : '';
+
+  const authOptions = {
     access_type: 'offline',
     scope: SCOPES,
     prompt: 'consent'
-  });
+  };
+
+  if (statePayload) {
+    authOptions.state = statePayload;
+  }
+
+  const authUrl = oauth2Client.generateAuthUrl(authOptions);
   res.redirect(authUrl);
 });
 
 // 2. Google redirects back here with authorization code
 router.get('/google/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
 
   if (!code) {
     return res.status(400).send('Authorization code missing');
+  }
+
+  let stateUid = '';
+  if (state) {
+    try {
+      const parsed = JSON.parse(state);
+      if (parsed && parsed.uid) stateUid = parsed.uid;
+    } catch {
+      stateUid = state;
+    }
   }
 
   try {
@@ -49,11 +68,13 @@ router.get('/google/callback', async (req, res) => {
     oauth2Client.setCredentials(tokens);
 
     let userEmail = '';
+    let userName = '';
     try {
       const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
       const userInfo = await oauth2.userinfo.get();
       if (userInfo && userInfo.data && userInfo.data.email) {
         userEmail = userInfo.data.email;
+        userName = userInfo.data.name || '';
         authenticatedUser = {
           email: userInfo.data.email,
           name: userInfo.data.name || ''
@@ -74,9 +95,26 @@ router.get('/google/callback', async (req, res) => {
       console.warn('[Auth] Could not write session to disk:', e.message);
     }
 
+    // Link Gmail OAuth tokens to users/{uid}/connectedAccounts/gmail in Firestore
+    const targetUid = stateUid || (req.user && !req.user.isLocal ? req.user.uid : null);
+    if (targetUid) {
+      try {
+        await firestoreService.saveUserConnectedAccount(targetUid, 'gmail', {
+          tokens,
+          connectedEmail: userEmail,
+          connectedName: userName,
+          provider: 'google-gmail'
+        });
+        console.log(`[Auth] Linked Gmail OAuth tokens in Firestore for UID: ${targetUid}`);
+      } catch (fsErr) {
+        console.warn('[Auth] Failed linking connected account in Firestore:', fsErr.message);
+      }
+    }
+
     const emailQuery = userEmail ? `&email=${encodeURIComponent(userEmail)}` : '';
-    // Redirect user to the frontend dashboard
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?auth=success${emailQuery}`);
+    const uidQuery = targetUid ? `&uid=${encodeURIComponent(targetUid)}` : '';
+    // Redirect user to the frontend dashboard with confirmation params
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?auth=success&gmail=connected${emailQuery}${uidQuery}`);
   } catch (error) {
     console.error('Error exchanging OAuth code:', error);
     res.status(500).send('OAuth Authentication Failed');
@@ -84,12 +122,21 @@ router.get('/google/callback', async (req, res) => {
 });
 
 // 3. Status check endpoint
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   const isGoogleAuthenticated = Boolean(
     oauth2Client.credentials &&
     (oauth2Client.credentials.access_token || oauth2Client.credentials.refresh_token)
   );
   const isFirebaseAuthenticated = Boolean(req.user && req.user.firebase);
+
+  let hasCloudGmail = false;
+  if (req.user && req.user.uid && !req.user.isLocal) {
+    try {
+      hasCloudGmail = await firestoreService.hasUserConnectedGmail(req.user.uid);
+    } catch {}
+  }
+
+  const hasGmail = isGoogleAuthenticated || hasCloudGmail;
   const isAuthenticated = isGoogleAuthenticated || isFirebaseAuthenticated;
 
   const effectiveUser = req.user || (isGoogleAuthenticated ? authenticatedUser : null);
@@ -99,6 +146,8 @@ router.get('/status', (req, res) => {
     success: true,
     authenticated: isAuthenticated,
     firebase: isFirebaseAuthenticated,
+    hasGmail,
+    connectedGmail: hasGmail,
     user: effectiveUser,
     email: effectiveEmail,
     message: isAuthenticated

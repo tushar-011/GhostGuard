@@ -7,7 +7,25 @@ const auditRoutes = require('./src/routes/auditRoutes');
 
 const app = express();
 
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
+// Enable CORS for frontend dashboard (http://localhost:3000) and Chrome extensions (chrome-extension://)
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, server-to-server, extension background scripts)
+      if (!origin) return callback(null, true);
+      if (
+        origin.startsWith('chrome-extension://') ||
+        origin.startsWith('http://localhost:') ||
+        origin.startsWith('http://127.0.0.1:') ||
+        origin === (process.env.FRONTEND_URL || 'http://localhost:3000')
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // Routes

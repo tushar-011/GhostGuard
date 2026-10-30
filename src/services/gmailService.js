@@ -12,7 +12,7 @@ async function fetchAccountDiscoveryEmails(authClient) {
   const response = await gmail.users.messages.list({
     userId: 'me',
     q: searchQuery,
-    maxResults: 50
+    maxResults: 200
   });
 
   const messages = response.data.messages || [];

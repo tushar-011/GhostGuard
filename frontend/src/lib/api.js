@@ -157,6 +157,16 @@ export const auditApi = {
     const query = mock ? '?mock=true' : '';
     return fetchApi(`/api/audit/stats${query}`);
   },
+
+  /**
+   * Clears the stored audit findings cache
+   * @returns {Promise<{ success: boolean, message: string }>}
+   */
+  clearCache: async () => {
+    return fetchApi('/api/audit/clear', {
+      method: 'POST',
+    });
+  },
 };
 
 const api = {

@@ -438,16 +438,16 @@ export default function CategorizedFootprintDirectory() {
     }
   }, [contextAssets]);
 
-  // Base list of accounts (real or demo fallback)
+  // Base list of accounts (real or demo fallback) - single source of truth from shared context
   const allAccounts = useMemo(() => {
-    if (localAssets && localAssets.length > 0) {
-      return localAssets;
-    }
     if (contextAssets && contextAssets.length > 0) {
       return contextAssets;
     }
+    if (localAssets && localAssets.length > 0) {
+      return localAssets;
+    }
     return isLiveEffective ? [] : DEMO_FALLBACK_ACCOUNTS;
-  }, [localAssets, contextAssets, isLiveEffective]);
+  }, [contextAssets, localAssets, isLiveEffective]);
 
   // Handle Action Trigger with Optimistic Update
   const handleAccountAction = useCallback(

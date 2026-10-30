@@ -132,8 +132,9 @@ router.get('/scan', async (req, res) => {
     res.json({
       success: true,
       mode: isMock ? 'mock' : 'live',
-      count: scoredAccounts.length,
-      assets: scoredAccounts
+      count: persistedAccounts.length,
+      assets: persistedAccounts,
+      batchDiscoveredCount: scoredAccounts.length
     });
   } catch (error) {
     console.error('Audit scan failed:', error);
@@ -232,15 +233,22 @@ function computeAuditStats(accounts = []) {
     }
 
     // Risk count
-    const risk = account.riskLevel || 'Low';
-    if (risk === 'High') highRiskCount++;
-    if (riskBreakdown[risk] !== undefined) {
-      riskBreakdown[risk]++;
+    const rawRisk = account.riskLevel || 'Low';
+    const upperRisk = rawRisk.toUpperCase();
+    const isHigh = upperRisk === 'HIGH' || (typeof account.ghostScore === 'number' && account.ghostScore >= 70);
+
+    if (isHigh) {
+      highRiskCount++;
+      riskBreakdown.High = (riskBreakdown.High || 0) + 1;
+    } else if (upperRisk === 'MEDIUM' || upperRisk === 'MED') {
+      riskBreakdown.Medium = (riskBreakdown.Medium || 0) + 1;
+    } else {
+      riskBreakdown.Low = (riskBreakdown.Low || 0) + 1;
     }
 
     // Status count
     const status = account.status || 'UNREVIEWED';
-    if (status !== 'UNREVIEWED') {
+    if (status && status !== 'UNREVIEWED') {
       reviewedCount++;
     }
     if (statusBreakdown[status] !== undefined) {
@@ -356,6 +364,38 @@ router.delete('/asset/:domain', async (req, res) => {
 });
 
 /**
+ * 3c. POST /api/audit/clear & DELETE /api/audit/cache
+ * Clears data/audit_store.json
+ */
+router.post('/clear', async (req, res) => {
+  try {
+    await storeService.clearStore();
+    res.json({
+      success: true,
+      message: 'Audit cache cleared successfully.',
+      stats: computeAuditStats([])
+    });
+  } catch (error) {
+    console.error('Failed to clear audit store:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.delete('/cache', async (req, res) => {
+  try {
+    await storeService.clearStore();
+    res.json({
+      success: true,
+      message: 'Audit cache cleared successfully.',
+      stats: computeAuditStats([])
+    });
+  } catch (error) {
+    console.error('Failed to clear audit store:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * 4. GET /api/audit/stats
  * Aggregates high-level metrics across all audited accounts in storage.
  * Returns: { totalDiscovered, dormantCount, highRiskCount, reviewedCount, ... }
@@ -376,6 +416,11 @@ router.get('/stats', async (req, res) => {
 
     res.json({
       success: true,
+      totalDiscovered: stats.totalDiscovered,
+      highRiskCount: stats.highRiskCount,
+      dormantCount: stats.dormantCount,
+      reviewedCount: stats.reviewedCount,
+      ghostScore: stats.ghostScore,
       stats
     });
   } catch (error) {

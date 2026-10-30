@@ -14,6 +14,7 @@ import {
   ChevronRight,
   CircleHelp,
   Cloud,
+  Download,
   ExternalLink,
   Eye,
   EyeOff,
@@ -29,6 +30,7 @@ import {
   Menu,
   Network,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   Shield,
@@ -286,11 +288,12 @@ export function GhostGuardProvider({ children }) {
 
     try {
       // 1. Fetch scan (or fallback to stored accounts)
+      let currentAssets = [];
       try {
         const scanRes = await auditApi.scan();
         if (scanRes && scanRes.assets) {
+          currentAssets = scanRes.assets;
           setAssets(scanRes.assets);
-          setScanMessage(`Discovered ${scanRes.assets.length} registered accounts.`);
           setSessionExpired(false);
         }
       } catch (scanErr) {
@@ -299,6 +302,7 @@ export function GhostGuardProvider({ children }) {
           try {
             const accountsRes = await auditApi.getAccounts();
             if (accountsRes && accountsRes.assets && accountsRes.assets.length > 0) {
+              currentAssets = accountsRes.assets;
               setAssets(accountsRes.assets);
             }
           } catch {}
@@ -308,8 +312,13 @@ export function GhostGuardProvider({ children }) {
       // 2. Fetch stats
       try {
         const statsRes = await auditApi.getStats();
-        if (statsRes && statsRes.stats) {
-          setStats(statsRes.stats);
+        const s = statsRes?.stats || statsRes;
+        if (s) {
+          setStats(s);
+          const total = s.totalDiscovered ?? currentAssets.length;
+          setScanMessage(`Discovered ${total} registered accounts.`);
+        } else if (currentAssets.length > 0) {
+          setScanMessage(`Discovered ${currentAssets.length} registered accounts.`);
         }
       } catch (statsErr) {
         if (statsErr.status === 401) {
@@ -339,10 +348,13 @@ export function GhostGuardProvider({ children }) {
       if (scanRes && scanRes.assets) {
         setAssets(scanRes.assets);
         setSessionExpired(false);
-        setScanMessage(`Scan complete: Discovered ${scanRes.count || scanRes.assets.length} registered accounts.`);
 
         const statsRes = await auditApi.getStats();
-        if (statsRes && statsRes.stats) setStats(statsRes.stats);
+        const s = statsRes?.stats || statsRes;
+        if (s) setStats(s);
+
+        const totalAccounts = s?.totalDiscovered ?? scanRes.assets.length;
+        setScanMessage(`Scan complete: Discovered ${totalAccounts} registered accounts.`);
 
         const graphRes = await auditApi.getGraph({ email: userEmail });
         if (graphRes && graphRes.graph) setGraph(graphRes.graph);
@@ -719,7 +731,12 @@ export function DashboardShell({ children, title, description }) {
   const pathname = usePathname();
   const [mobile, setMobile] = useState(false);
   const [query, setQuery] = useState("");
-  const { isLive, userEmail, userName, logout, assets } = useGhostGuard();
+  const { isLive, userEmail, userName, logout, assets, stats } = useGhostGuard();
+
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const notificationsRef = useRef(null);
+  const profileMenuRef = useRef(null);
 
   const isLiveEffective = isLive || (typeof window !== "undefined" && (
     new URLSearchParams(window.location.search).get("auth") === "success" ||
@@ -729,6 +746,133 @@ export function DashboardShell({ children, title, description }) {
 
   const effectiveEmail = userEmail || (typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("email") || window.localStorage.getItem("ghostguard_email")) : "") || "";
   const displayName = userName || (effectiveEmail ? effectiveEmail.split("@")[0] : (isLiveEffective ? "Workspace" : "Alex"));
+
+  const getInitials = (name, email) => {
+    if (name && name.trim()) {
+      const parts = name.trim().split(" ");
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return name.slice(0, 2).toUpperCase();
+    }
+    if (email && email.includes("@")) {
+      const parts = email.split("@")[0].split(/[._-]/);
+      if (parts.length >= 2 && parts[1]) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return email.slice(0, 2).toUpperCase();
+    }
+    return "GG";
+  };
+
+  const initials = getInitials(displayName, effectiveEmail);
+
+  const [notifications, setNotifications] = useState([
+    {
+      id: "alert-welcome",
+      title: "Welcome Alert",
+      message: "Welcome back to GhostGuard • Your digital footprint scan completed successfully.",
+      time: "Just now",
+      read: false,
+      type: "welcome",
+      href: "/dashboard",
+    },
+    {
+      id: "alert-audit",
+      title: "Audit Alert",
+      message: "3 Dormant/Ghost accounts detected • Review high-exposure platforms.",
+      time: "15m ago",
+      read: false,
+      type: "audit",
+      href: "/dashboard/accounts",
+    },
+    {
+      id: "alert-security",
+      title: "Security Alert",
+      message: "Identity posture is currently active at 89% health.",
+      time: "1h ago",
+      read: false,
+      type: "security",
+      href: "/dashboard/security",
+    },
+  ]);
+
+  // Synchronize dynamic counts from live stats if available
+  useEffect(() => {
+    if (stats) {
+      setNotifications((prev) =>
+        prev.map((n) => {
+          if (n.id === "alert-audit" && stats.dormantCount !== undefined) {
+            return {
+              ...n,
+              message: `${stats.dormantCount} Dormant/Ghost accounts detected • Review high-exposure platforms.`,
+            };
+          }
+          if (n.id === "alert-security" && stats.ghostScore !== undefined) {
+            const health = Math.max(10, 100 - stats.ghostScore);
+            return {
+              ...n,
+              message: `Identity posture is currently active at ${health}% health.`,
+            };
+          }
+          return n;
+        })
+      );
+    }
+  }, [stats]);
+
+  // Outside-click & Escape key listener for clean popover dismiss
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        setIsNotificationsOpen(false);
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    function handleClickOutside(event) {
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target)) {
+        setIsNotificationsOpen(false);
+      }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
+
+  const markAllNotificationsAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const handleLogout = async () => {
+    setIsProfileMenuOpen(false);
+    try {
+      await authApi.logout();
+    } catch {}
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("ghostguard-demo-session");
+      window.localStorage.removeItem("ghostguard_auth");
+      window.localStorage.removeItem("ghostguard_mode");
+      window.localStorage.removeItem("ghostguard_email");
+      // Clear all local cookies
+      document.cookie.split(";").forEach((c) => {
+        document.cookie = c
+          .replace(/^ +/, "")
+          .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+      });
+      // Reset any query parameters and redirect to landing page
+      window.location.href = "/";
+    }
+  };
 
   const searchSource = assets && assets.length > 0
     ? assets.map((a, i) => mapBackendAssetToAccount(a, i))
@@ -751,7 +895,7 @@ export function DashboardShell({ children, title, description }) {
           </button>
         </div>
         <div className="workspace-switch">
-          <ProfileAvatar className="workspace-avatar" />
+          <ProfileAvatar className="workspace-avatar" initials={initials} />
           <div>
             <strong>{isLiveEffective ? `${displayName}’s Workspace` : "Alex’s workspace"}</strong>
             <small>
@@ -779,7 +923,7 @@ export function DashboardShell({ children, title, description }) {
           <Link href="/">
             <ArrowRight size={16} /> Back to website
           </Link>
-          <button onClick={logout}>
+          <button onClick={handleLogout}>
             <LogOut size={16} /> Log out{" "}
             <span
               className="demo-mini"
@@ -830,15 +974,366 @@ export function DashboardShell({ children, title, description }) {
                 </div>
               )}
             </div>
-            <button className="icon-button notification-button" aria-label="Notifications">
-              <Bell size={18} />
-              <span />
-            </button>
+
+            {/* Notification Bell Dropdown */}
+            <div className="header-action-wrapper" ref={notificationsRef}>
+              <button
+                className={`icon-button notification-button ${isNotificationsOpen ? "active" : ""}`}
+                aria-label="Notifications"
+                aria-expanded={isNotificationsOpen}
+                onClick={() => {
+                  setIsNotificationsOpen((prev) => !prev);
+                  setIsProfileMenuOpen(false);
+                }}
+                style={{ position: "relative" }}
+              >
+                <Bell size={18} />
+                {unreadCount > 0 && (
+                  <span
+                    className="notification-indicator-dot"
+                    style={{
+                      position: "absolute",
+                      top: "7px",
+                      right: "7px",
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "50%",
+                      backgroundColor: "#4ade80",
+                      boxShadow: "0 0 8px #4ade80",
+                    }}
+                  />
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isNotificationsOpen && (
+                  <motion.div
+                    className="notification-popover"
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.16, ease: "easeOut" }}
+                  >
+                    {/* Header */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "13px 16px",
+                        borderBottom: "1px solid rgba(74, 222, 128, 0.12)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <strong style={{ fontSize: "13.5px", fontWeight: 700, color: "#f0fdf4" }}>
+                          Notifications
+                        </strong>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "2px 7px",
+                            borderRadius: "9999px",
+                            background: unreadCount > 0 ? "rgba(74, 222, 128, 0.15)" : "rgba(148, 163, 184, 0.12)",
+                            color: unreadCount > 0 ? "#4ade80" : "#94a3b8",
+                            border: unreadCount > 0 ? "1px solid rgba(74, 222, 128, 0.3)" : "1px solid rgba(148, 163, 184, 0.2)",
+                          }}
+                        >
+                          {unreadCount} {unreadCount === 1 ? "alert" : "alerts"}
+                        </span>
+                      </div>
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={markAllNotificationsAsRead}
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#86efac",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            padding: "2px 4px",
+                            borderRadius: "4px",
+                            transition: "color 0.15s ease",
+                          }}
+                        >
+                          Mark all as read
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Notification Items */}
+                    <div style={{ maxHeight: "310px", overflowY: "auto", padding: "6px" }}>
+                      {notifications.map((item) => {
+                        const isAudit = item.type === "audit";
+                        const isWelcome = item.type === "welcome";
+                        const iconColor = isAudit ? "#fbbf24" : "#4ade80";
+                        const iconBg = isAudit ? "rgba(251, 191, 36, 0.14)" : "rgba(74, 222, 128, 0.14)";
+                        const iconBorder = isAudit ? "rgba(251, 191, 36, 0.3)" : "rgba(74, 222, 128, 0.3)";
+                        const IconComponent = isAudit ? AlertTriangle : (isWelcome ? Sparkles : ShieldCheck);
+
+                        return (
+                          <Link
+                            key={item.id}
+                            href={item.href}
+                            onClick={() => {
+                              setNotifications((prev) =>
+                                prev.map((n) => (n.id === item.id ? { ...n, read: true } : n))
+                              );
+                              setIsNotificationsOpen(false);
+                            }}
+                            className="notification-item"
+                            style={{
+                              background: item.read ? "transparent" : "rgba(74, 222, 128, 0.04)",
+                              border: item.read ? "1px solid transparent" : "1px solid rgba(74, 222, 128, 0.12)",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "30px",
+                                height: "30px",
+                                borderRadius: "8px",
+                                background: iconBg,
+                                border: `1px solid ${iconBorder}`,
+                                color: iconColor,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                flexShrink: 0,
+                                marginTop: "2px",
+                              }}
+                            >
+                              <IconComponent size={15} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" }}>
+                                <span style={{ fontSize: "12px", fontWeight: 700, color: "#f0fdf4" }}>
+                                  {item.title}
+                                </span>
+                                <span style={{ fontSize: "10px", color: "#64748b" }}>
+                                  {item.time}
+                                </span>
+                              </div>
+                              <p
+                                style={{
+                                  margin: "3px 0 0",
+                                  fontSize: "11.5px",
+                                  lineHeight: 1.4,
+                                  color: item.read ? "#94a3b8" : "#cbd5e1",
+                                }}
+                              >
+                                {item.message}
+                              </p>
+                            </div>
+                            {!item.read && (
+                              <span
+                                style={{
+                                  width: "6px",
+                                  height: "6px",
+                                  borderRadius: "50%",
+                                  background: isAudit ? "#fbbf24" : "#4ade80",
+                                  boxShadow: `0 0 6px ${isAudit ? "#fbbf24" : "#4ade80"}`,
+                                  position: "absolute",
+                                  top: "12px",
+                                  right: "9px",
+                                }}
+                              />
+                            )}
+                          </Link>
+                        );
+                      })}
+                    </div>
+
+                    {/* Footer */}
+                    <div
+                      style={{
+                        padding: "10px 16px",
+                        borderTop: "1px solid rgba(74, 222, 128, 0.12)",
+                        background: "rgba(15, 24, 19, 0.6)",
+                        textAlign: "center",
+                      }}
+                    >
+                      <Link
+                        href="/dashboard/security"
+                        onClick={() => setIsNotificationsOpen(false)}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "6px",
+                          fontSize: "11.5px",
+                          fontWeight: 600,
+                          color: "#86efac",
+                          textDecoration: "none",
+                          transition: "color 0.15s ease",
+                        }}
+                      >
+                        View all in Security Posture
+                        <ChevronRight size={13} />
+                      </Link>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Appearance / Theme Toggle (Untouched) */}
             <ThemeToggle />
-            <button className="profile-button" aria-label="Open profile menu">
-              <ProfileAvatar className="profile-avatar" />
-              <ChevronDown size={15} />
-            </button>
+
+            {/* Profile Dropdown Menu */}
+            <div className="header-action-wrapper" ref={profileMenuRef}>
+              <button
+                className={`profile-button ${isProfileMenuOpen ? "active" : ""}`}
+                aria-label="Open profile menu"
+                aria-expanded={isProfileMenuOpen}
+                onClick={() => {
+                  setIsProfileMenuOpen((prev) => !prev);
+                  setIsNotificationsOpen(false);
+                }}
+              >
+                <ProfileAvatar className="profile-avatar" initials={initials} />
+                <ChevronDown
+                  size={15}
+                  style={{
+                    transform: isProfileMenuOpen ? "rotate(180deg)" : "rotate(0deg)",
+                    transition: "transform 0.2s ease",
+                  }}
+                />
+              </button>
+
+              <AnimatePresence>
+                {isProfileMenuOpen && (
+                  <motion.div
+                    className="profile-popover"
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.16, ease: "easeOut" }}
+                  >
+                    {/* User Info Section (Top) */}
+                    <div style={{ padding: "14px 16px", borderBottom: "1px solid rgba(74, 222, 128, 0.12)" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "50%",
+                            background: "rgba(74, 222, 128, 0.15)",
+                            border: "1px solid rgba(74, 222, 128, 0.3)",
+                            color: "#4ade80",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: 700,
+                            fontSize: "12.5px",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {initials}
+                        </div>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <strong
+                            style={{
+                              display: "block",
+                              fontSize: "13px",
+                              fontWeight: 700,
+                              color: "#f0fdf4",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {displayName}
+                          </strong>
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: "11px",
+                              color: "#94a3b8",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {effectiveEmail || "alex@demo.co"}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: "10px" }}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "3px 8px",
+                            borderRadius: "9999px",
+                            fontSize: "9.5px",
+                            fontWeight: 700,
+                            letterSpacing: "0.4px",
+                            background: isLiveEffective ? "rgba(74, 222, 128, 0.14)" : "rgba(34, 211, 238, 0.12)",
+                            color: isLiveEffective ? "#4ade80" : "var(--cyan)",
+                            border: isLiveEffective ? "1px solid rgba(74, 222, 128, 0.28)" : "1px solid rgba(34, 211, 238, 0.25)",
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: "5px",
+                              height: "5px",
+                              borderRadius: "50%",
+                              background: isLiveEffective ? "#4ade80" : "var(--cyan)",
+                              boxShadow: isLiveEffective ? "0 0 6px #4ade80" : "none",
+                            }}
+                          />
+                          {isLiveEffective ? "LIVE AUDIT ACTIVE" : "DEMO WORKSPACE"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Menu Navigation Items */}
+                    <div style={{ padding: "6px" }}>
+                      <Link
+                        href="/dashboard"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="profile-menu-item"
+                      >
+                        <Grid2X2 size={15} style={{ color: "#4ade80" }} />
+                        Identity Overview
+                      </Link>
+                      <Link
+                        href="/dashboard/accounts"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="profile-menu-item"
+                      >
+                        <Layers size={15} style={{ color: "#4ade80" }} />
+                        All Audited Accounts
+                      </Link>
+                      <Link
+                        href="/dashboard/settings"
+                        onClick={() => setIsProfileMenuOpen(false)}
+                        className="profile-menu-item"
+                      >
+                        <Settings size={15} style={{ color: "#4ade80" }} />
+                        Settings
+                      </Link>
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ height: "1px", background: "rgba(74, 222, 128, 0.12)", margin: "2px 0" }} />
+
+                    {/* Log Out Button */}
+                    <div style={{ padding: "6px" }}>
+                      <button
+                        onClick={handleLogout}
+                        className="profile-logout-button"
+                      >
+                        <LogOut size={15} />
+                        Log Out
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </header>
         <main className="dashboard-main">{children}</main>
@@ -847,7 +1342,7 @@ export function DashboardShell({ children, title, description }) {
   );
 }
 
-function ProfileAvatar({ className = "", src = "", alt = "Profile" }) {
+function ProfileAvatar({ className = "", src = "", alt = "Profile", initials = "" }) {
   const [imageFailed, setImageFailed] = useState(false);
   return (
     <span className={`profile-avatar-fallback ${className}`}>
@@ -855,7 +1350,11 @@ function ProfileAvatar({ className = "", src = "", alt = "Profile" }) {
         // Profile images are optional demo data; the icon remains the reliable fallback.
         // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt={alt} onError={() => setImageFailed(true)} />
-      ) : <UserRound size={17} aria-hidden="true" />}
+      ) : initials ? (
+        <span style={{ fontSize: "11px", fontWeight: 700 }}>{initials}</span>
+      ) : (
+        <UserRound size={17} aria-hidden="true" />
+      )}
     </span>
   );
 }
@@ -1011,9 +1510,9 @@ export function DashboardPage() {
     return () => { active = false; };
   }, [isLiveEffective]);
 
-  const stats = localStats || contextStats;
-  const assets = localAssets.length > 0 ? localAssets : contextAssets;
-  const loading = localLoading || contextLoading;
+  const stats = contextStats || localStats;
+  const assets = (contextAssets && contextAssets.length > 0) ? contextAssets : localAssets;
+  const loading = contextLoading || localLoading;
   const sessionExpired = localSessionExpired || contextSessionExpired;
   const activeEmail = localEmail || contextUserEmail || (typeof window !== "undefined" ? window.localStorage.getItem("ghostguard_email") : "") || "";
 
@@ -1914,10 +2413,762 @@ export { CategorizedFootprintDirectory };
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const [saved, setSaved] = useState(false);
-  return <DashboardShell title="Settings" description="Shape your GhostGuard experience."><DemoBanner /><div className="settings-layout"><div className="settings-tabs"><span className="active">Profile</span><span>Appearance</span><span>Notifications</span><span>Privacy</span><span>Account</span></div><div className="settings-content"><SettingSection title="Profile" copy="This information stays in the frontend demo only."><div className="profile-edit"><span className="profile-avatar large">A</span><button className="button button-ghost">Change avatar</button></div><div className="settings-fields"><label>Full name<input defaultValue="Alex Morgan" /></label><label>Email address<input defaultValue="alex@demo.co" type="email" /></label></div></SettingSection><SettingSection title="Appearance" copy="Choose how GhostGuard feels across your workspace."><div className="theme-options"><button className={theme === "dark" ? "selected" : ""} onClick={() => setTheme("dark")}><span className="theme-swatch dark-swatch" /><strong>Dark theme</strong><small>Midnight navy and electric violet</small>{theme === "dark" && <Check size={16} />}</button><button className={theme === "light" ? "selected" : ""} onClick={() => setTheme("light")}><span className="theme-swatch light-swatch" /><strong>Light theme</strong><small>Clean white and soft lavender</small>{theme === "light" && <Check size={16} />}</button></div></SettingSection><SettingSection title="Preferences" copy="Manage how your workspace behaves."><label className="toggle-row"><span><strong>Weekly identity review</strong><small>Receive a reminder to review accounts that need attention.</small></span><input type="checkbox" defaultChecked /></label><label className="toggle-row"><span><strong>Motion reduction</strong><small>Respect reduced motion preferences for interface animations.</small></span><input type="checkbox" /></label></SettingSection><button className="button button-primary" onClick={() => setSaved(true)}>Save demo preferences <Check size={16} /></button>{saved && <p className="success-text"><Check size={16} /> Preferences updated in local frontend state. No database is connected.</p>}</div></div></DashboardShell>;
+  const { isLive, userEmail, userName, assets, refreshData, logout } = useGhostGuard();
+
+  const isLiveEffective = isLive || (typeof window !== "undefined" && (
+    new URLSearchParams(window.location.search).get("auth") === "success" ||
+    window.localStorage.getItem("ghostguard_auth") === "true" ||
+    window.localStorage.getItem("ghostguard_mode") === "LIVE"
+  ));
+
+  const effectiveEmail = userEmail || (typeof window !== "undefined" ? (new URLSearchParams(window.location.search).get("email") || window.localStorage.getItem("ghostguard_email")) : "") || "";
+  const initialName = userName || (effectiveEmail ? effectiveEmail.split("@")[0] : (isLiveEffective ? "Workspace Admin" : "User"));
+
+  // 1. Tab switching state
+  const [activeTab, setActiveTab] = useState("profile"); // 'profile' | 'appearance' | 'notifications' | 'privacy' | 'account'
+
+  // Profile form state
+  const [fullName, setFullName] = useState(() => {
+    if (typeof window !== "undefined") {
+      return window.localStorage.getItem("ghostguard_user_name") || initialName;
+    }
+    return initialName;
+  });
+  const [savedProfile, setSavedProfile] = useState(false);
+
+  // Notification preference toggles
+  const [weeklyReview, setWeeklyReview] = useState(true);
+  const [criticalAlerts, setCriticalAlerts] = useState(true);
+  const [breachNotices, setBreachNotices] = useState(true);
+  const [savedNotifications, setSavedNotifications] = useState(false);
+
+  // Motion reduction state
+  const [reduceMotion, setReduceMotion] = useState(false);
+
+  // Cache & Export states
+  const [clearingCache, setClearingCache] = useState(false);
+  const [cacheCleared, setCacheCleared] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const getInitials = (name, email) => {
+    if (name && name.trim()) {
+      const parts = name.trim().split(" ");
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return name.slice(0, 2).toUpperCase();
+    }
+    if (email && email.includes("@")) {
+      const parts = email.split("@")[0].split(/[._-]/);
+      if (parts.length >= 2 && parts[1]) {
+        return (parts[0][0] + parts[1][0]).toUpperCase();
+      }
+      return email.slice(0, 2).toUpperCase();
+    }
+    return "GG";
+  };
+
+  const initials = getInitials(fullName, effectiveEmail);
+
+  const tabs = [
+    { id: "profile", label: "Profile", icon: UserRound },
+    { id: "appearance", label: "Appearance", icon: Sun },
+    { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "privacy", label: "Privacy & Data", icon: ShieldCheck },
+    { id: "account", label: "Account & Danger Zone", icon: LockKeyhole },
+  ];
+
+  const handleSaveProfile = (e) => {
+    if (e) e.preventDefault();
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("ghostguard_user_name", fullName);
+    }
+    setSavedProfile(true);
+    setTimeout(() => setSavedProfile(false), 3000);
+  };
+
+  const handleSaveNotifications = () => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        "ghostguard_notification_prefs",
+        JSON.stringify({ weeklyReview, criticalAlerts, breachNotices })
+      );
+    }
+    setSavedNotifications(true);
+    setTimeout(() => setSavedNotifications(false), 3000);
+  };
+
+  const handleClearCache = async () => {
+    if (!window.confirm("Are you sure you want to clear your local audit store cache? This will reset all discovered accounts.")) {
+      return;
+    }
+    setClearingCache(true);
+    try {
+      await auditApi.clearCache();
+      if (refreshData) {
+        await refreshData();
+      }
+      setCacheCleared(true);
+      setTimeout(() => setCacheCleared(false), 4000);
+    } catch (err) {
+      console.error("Failed clearing audit cache:", err);
+      alert(`Could not clear cache: ${err.message}`);
+    } finally {
+      setClearingCache(false);
+    }
+  };
+
+  const handleExportTelemetry = () => {
+    try {
+      setExporting(true);
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        auditedIdentity: effectiveEmail || "GhostGuard User",
+        totalDiscovered: assets ? assets.length : 0,
+        assets: assets || [],
+      };
+      const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
+        JSON.stringify(exportData, null, 2)
+      )}`;
+      const downloadAnchor = document.createElement("a");
+      downloadAnchor.setAttribute("href", jsonString);
+      downloadAnchor.setAttribute(
+        "download",
+        `ghostguard-telemetry-${new Date().toISOString().slice(0, 10)}.json`
+      );
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    } finally {
+      setTimeout(() => setExporting(false), 1200);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!window.confirm("Disconnect your Google account and revoke session? You will be returned to the home screen.")) {
+      return;
+    }
+    try {
+      await authApi.logout();
+    } catch {}
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("ghostguard-demo-session");
+      window.localStorage.removeItem("ghostguard_auth");
+      window.localStorage.removeItem("ghostguard_mode");
+      window.localStorage.removeItem("ghostguard_email");
+      document.cookie.split(";").forEach((c) => {
+        document.cookie = c
+          .replace(/^ +/, "")
+          .replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+      });
+      window.location.href = "/";
+    }
+  };
+
+  return (
+    <DashboardShell
+      title="Settings"
+      description="Manage preferences, notification triggers, and privacy controls."
+    >
+      <DemoBanner />
+      <div className="settings-modern-layout">
+        {/* Left Sub-Navigation Sidebar */}
+        <aside className="settings-sidebar-card">
+          <div style={{ padding: "4px 8px 8px", borderBottom: "1px solid rgba(74, 222, 128, 0.1)", marginBottom: "4px" }}>
+            <span className="eyebrow" style={{ color: "#4ade80", fontSize: "10px" }}>WORKSPACE PREFERENCES</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`settings-tab-btn ${isActive ? "active" : ""}`}
+                >
+                  <Icon size={16} />
+                  <span>{tab.label}</span>
+                  {isActive && <ChevronRight size={14} style={{ marginLeft: "auto", color: "#4ade80" }} />}
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        {/* Right Active Tab Content Panel */}
+        <div style={{ minWidth: 0 }}>
+          <AnimatePresence mode="wait">
+            {/* 1. PROFILE TAB */}
+            {activeTab === "profile" && (
+              <motion.div
+                key="profile"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className="settings-panel-card"
+              >
+                <div className="settings-panel-header">
+                  <h2 className="settings-panel-title">Profile Information</h2>
+                  <p className="settings-panel-subtitle">
+                    Manage your display credentials, personal information, and authenticated identity.
+                  </p>
+                </div>
+
+                {/* Avatar Section */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "16px",
+                    padding: "16px",
+                    background: "rgba(15, 24, 19, 0.4)",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(74, 222, 128, 0.1)",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "56px",
+                      height: "56px",
+                      borderRadius: "14px",
+                      background: "rgba(74, 222, 128, 0.15)",
+                      border: "1.5px solid rgba(74, 222, 128, 0.35)",
+                      color: "#4ade80",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "20px",
+                      fontWeight: 700,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {initials}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      <strong style={{ fontSize: "14px", color: "#f0fdf4" }}>{fullName || "User Profile"}</strong>
+                      <span
+                        style={{
+                          fontSize: "10px",
+                          fontWeight: 700,
+                          padding: "2px 7px",
+                          borderRadius: "9999px",
+                          background: "rgba(74, 222, 128, 0.15)",
+                          color: "#4ade80",
+                          border: "1px solid rgba(74, 222, 128, 0.3)",
+                        }}
+                      >
+                        ● Google Verified
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        className="button button-ghost"
+                        style={{ padding: "5px 12px", fontSize: "11.5px", minHeight: "32px" }}
+                        onClick={() => {
+                          if (effectiveEmail) {
+                            setFullName(effectiveEmail.split("@")[0]);
+                            setSavedProfile(true);
+                            setTimeout(() => setSavedProfile(false), 3000);
+                          }
+                        }}
+                      >
+                        <RefreshCw size={13} style={{ marginRight: "4px" }} /> Sync from Google
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Form Fields */}
+                <form onSubmit={handleSaveProfile} style={{ display: "grid", gap: "16px" }}>
+                  <label style={{ display: "grid", gap: "7px", fontSize: "13px", fontWeight: 600, color: "#94a3b8" }}>
+                    Full Name / Display Name
+                    <input
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Your display name"
+                      style={{
+                        padding: "11px 14px",
+                        borderRadius: "9px",
+                        background: "rgba(15, 24, 19, 0.6)",
+                        border: "1px solid rgba(74, 222, 128, 0.2)",
+                        color: "#f0fdf4",
+                        fontSize: "14px",
+                        outline: "none",
+                      }}
+                    />
+                  </label>
+
+                  <label style={{ display: "grid", gap: "7px", fontSize: "13px", fontWeight: 600, color: "#94a3b8" }}>
+                    Email Address (Managed by Google)
+                    <input
+                      readOnly
+                      value={effectiveEmail || "user@gmail.com"}
+                      style={{
+                        padding: "11px 14px",
+                        borderRadius: "9px",
+                        background: "rgba(15, 24, 19, 0.3)",
+                        border: "1px solid rgba(74, 222, 128, 0.1)",
+                        color: "#94a3b8",
+                        fontSize: "14px",
+                        cursor: "not-allowed",
+                      }}
+                    />
+                    <small style={{ color: "#64748b", fontSize: "11px" }}>
+                      Managed via Google OAuth 2.0. Primary authentication identifier for inbox audits.
+                    </small>
+                  </label>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "8px" }}>
+                    <button
+                      type="submit"
+                      className="button button-primary"
+                      style={{
+                        background: "#4ade80",
+                        color: "#0c1a12",
+                        fontWeight: 700,
+                        padding: "10px 22px",
+                      }}
+                    >
+                      Save Changes <Check size={16} />
+                    </button>
+                    {savedProfile && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#4ade80", fontSize: "12px", fontWeight: 600 }}>
+                        <Check size={15} /> Profile changes saved successfully.
+                      </span>
+                    )}
+                  </div>
+                </form>
+              </motion.div>
+            )}
+
+            {/* 2. APPEARANCE TAB */}
+            {activeTab === "appearance" && (
+              <motion.div
+                key="appearance"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className="settings-panel-card"
+              >
+                <div className="settings-panel-header">
+                  <h2 className="settings-panel-title">Appearance &amp; Interface</h2>
+                  <p className="settings-panel-subtitle">
+                    Choose how GhostGuard feels across your workspace.
+                  </p>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px" }}>
+                  {/* Dark Theme Option */}
+                  <button
+                    type="button"
+                    onClick={() => setTheme("dark")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "14px",
+                      padding: "16px",
+                      borderRadius: "12px",
+                      border: theme === "dark" ? "1.5px solid #4ade80" : "1px solid rgba(74, 222, 128, 0.14)",
+                      background: theme === "dark" ? "rgba(74, 222, 128, 0.08)" : "rgba(15, 24, 19, 0.4)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      position: "relative",
+                      transition: "all 0.15s ease",
+                      boxShadow: theme === "dark" ? "0 0 16px rgba(74, 222, 128, 0.15)" : "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "10px",
+                        background: "#0f1813",
+                        border: "1px solid #4ade80",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Moon size={18} style={{ color: "#4ade80" }} />
+                    </span>
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>Dark theme</strong>
+                      <small style={{ color: "#94a3b8", fontSize: "11px" }}>Midnight forest &amp; cyber emerald</small>
+                    </div>
+                    {theme === "dark" && <Check size={18} style={{ color: "#4ade80" }} />}
+                  </button>
+
+                  {/* Light Theme Option */}
+                  <button
+                    type="button"
+                    onClick={() => setTheme("light")}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "14px",
+                      padding: "16px",
+                      borderRadius: "12px",
+                      border: theme === "light" ? "1.5px solid #4ade80" : "1px solid rgba(74, 222, 128, 0.14)",
+                      background: theme === "light" ? "rgba(74, 222, 128, 0.08)" : "rgba(15, 24, 19, 0.4)",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      position: "relative",
+                      transition: "all 0.15s ease",
+                      boxShadow: theme === "light" ? "0 0 16px rgba(74, 222, 128, 0.15)" : "none",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "10px",
+                        background: "#ffffff",
+                        border: "1px solid rgba(148, 163, 184, 0.3)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Sun size={18} style={{ color: "#f59e0b" }} />
+                    </span>
+                    <div style={{ flex: 1 }}>
+                      <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>Light theme</strong>
+                      <small style={{ color: "#94a3b8", fontSize: "11px" }}>Clean white &amp; soft lavender</small>
+                    </div>
+                    {theme === "light" && <Check size={18} style={{ color: "#4ade80" }} />}
+                  </button>
+                </div>
+
+                {/* Motion Reduction Preference */}
+                <div className="settings-card-row">
+                  <div>
+                    <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>Motion Reduction</strong>
+                    <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                      Respect reduced motion preferences for interface transitions and 3D globe rendering.
+                    </span>
+                  </div>
+                  <ToggleSwitch
+                    id="motion-reduction"
+                    label="Toggle motion reduction"
+                    checked={reduceMotion}
+                    onChange={setReduceMotion}
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {/* 3. NOTIFICATIONS TAB */}
+            {activeTab === "notifications" && (
+              <motion.div
+                key="notifications"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className="settings-panel-card"
+              >
+                <div className="settings-panel-header">
+                  <h2 className="settings-panel-title">Audit Alerts &amp; Notifications</h2>
+                  <p className="settings-panel-subtitle">
+                    Configure real-time alerting channels for orphaned and exposed digital assets.
+                  </p>
+                </div>
+
+                <div style={{ display: "grid", gap: "12px" }}>
+                  {/* Toggle 1: Weekly identity hygiene review */}
+                  <div className="settings-card-row">
+                    <div>
+                      <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>
+                        Weekly identity hygiene review
+                      </strong>
+                      <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                        Receive a scheduled digest summary of dormant accounts and security score fluctuations.
+                      </span>
+                    </div>
+                    <ToggleSwitch
+                      id="weekly-review"
+                      label="Toggle weekly review"
+                      checked={weeklyReview}
+                      onChange={setWeeklyReview}
+                    />
+                  </div>
+
+                  {/* Toggle 2: Critical ghost asset alerts */}
+                  <div className="settings-card-row">
+                    <div>
+                      <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>
+                        Critical ghost asset alerts
+                      </strong>
+                      <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                        Immediate alerting when a high-risk external account is detected inactive for over 12 months.
+                      </span>
+                    </div>
+                    <ToggleSwitch
+                      id="critical-alerts"
+                      label="Toggle critical alerts"
+                      checked={criticalAlerts}
+                      onChange={setCriticalAlerts}
+                    />
+                  </div>
+
+                  {/* Toggle 3: Immediate breach exposure notices */}
+                  <div className="settings-card-row">
+                    <div>
+                      <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>
+                        Immediate breach exposure notices
+                      </strong>
+                      <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                        Push telemetry notifications whenever an audited domain is cited in known credential leak feeds.
+                      </span>
+                    </div>
+                    <ToggleSwitch
+                      id="breach-notices"
+                      label="Toggle breach notices"
+                      checked={breachNotices}
+                      onChange={setBreachNotices}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={handleSaveNotifications}
+                    className="button button-primary"
+                    style={{ background: "#4ade80", color: "#0c1a12", fontWeight: 700, padding: "10px 22px" }}
+                  >
+                    Save Alert Preferences <Check size={16} />
+                  </button>
+                  {savedNotifications && (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#4ade80", fontSize: "12px", fontWeight: 600 }}>
+                      <Check size={15} /> Preferences saved.
+                    </span>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {/* 4. PRIVACY & DATA TAB */}
+            {activeTab === "privacy" && (
+              <motion.div
+                key="privacy"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className="settings-panel-card"
+              >
+                <div className="settings-panel-header">
+                  <h2 className="settings-panel-title">Privacy &amp; Data Retention</h2>
+                  <p className="settings-panel-subtitle">
+                    GhostGuard is architected with zero-trust principles for user metadata.
+                  </p>
+                </div>
+
+                {/* Data Retention Policy Disclosure */}
+                <div
+                  style={{
+                    padding: "18px 20px",
+                    background: "rgba(74, 222, 128, 0.06)",
+                    border: "1px solid rgba(74, 222, 128, 0.22)",
+                    borderRadius: "14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", color: "#4ade80" }}>
+                    <ShieldCheck size={22} />
+                    <strong style={{ fontSize: "14.5px" }}>Zero-Knowledge Local Analysis</strong>
+                  </div>
+                  <p style={{ margin: 0, fontSize: "12.5px", color: "#f0fdf4", lineHeight: 1.55 }}>
+                    Your inbox scan metadata is stored locally and never sold to third parties.
+                  </p>
+                  <ul style={{ margin: "4px 0 0", paddingLeft: "18px", color: "#94a3b8", fontSize: "11.5px", lineHeight: 1.6 }}>
+                    <li><strong>Local Cache Only:</strong> Account discovery metadata is stored directly in <code style={{ color: "#4ade80" }}>data/audit_store.json</code> on your private instance.</li>
+                    <li><strong>No Content Harvesting:</strong> Email body text, attachments, passwords, and message contents are never parsed or persisted.</li>
+                    <li><strong>Instant Purge:</strong> You retain complete ownership and can clear all audit findings at any time.</li>
+                  </ul>
+                </div>
+
+                {/* Storage Telemetry Stats */}
+                <div className="settings-card-row">
+                  <div>
+                    <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>Local Store File</strong>
+                    <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                      Active findings file: <code style={{ color: "#86efac" }}>data/audit_store.json</code> ({assets?.length || 0} discovered services)
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: "10.5px",
+                      fontWeight: 700,
+                      padding: "3px 8px",
+                      borderRadius: "6px",
+                      background: "rgba(74, 222, 128, 0.12)",
+                      color: "#4ade80",
+                      border: "1px solid rgba(74, 222, 128, 0.25)",
+                    }}
+                  >
+                    ISOLATED
+                  </span>
+                </div>
+
+                {/* Clear Audit Cache Button */}
+                <div className="settings-card-row" style={{ borderColor: "rgba(248, 113, 113, 0.25)" }}>
+                  <div>
+                    <strong style={{ display: "block", fontSize: "13.5px", color: "#fca5a5" }}>Clear Audit Cache</strong>
+                    <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                      Permanently wipes cached records in <code style={{ color: "#f87171" }}>data/audit_store.json</code> and resets scanned inventory.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearCache}
+                    disabled={clearingCache}
+                    className="button"
+                    style={{
+                      background: "rgba(248, 113, 113, 0.12)",
+                      border: "1px solid rgba(248, 113, 113, 0.35)",
+                      color: "#fca5a5",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      padding: "8px 16px",
+                      minHeight: "36px",
+                    }}
+                  >
+                    {clearingCache ? <GhostGuardLoader inline /> : <Trash2 size={14} />} Clear Audit Cache
+                  </button>
+                </div>
+                {cacheCleared && (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#4ade80", fontSize: "12px", fontWeight: 600 }}>
+                    <Check size={15} /> Audit cache cleared. Local database has been reset.
+                  </span>
+                )}
+              </motion.div>
+            )}
+
+            {/* 5. ACCOUNT & DANGER ZONE TAB */}
+            {activeTab === "account" && (
+              <motion.div
+                key="account"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.16, ease: "easeOut" }}
+                className="settings-panel-card"
+              >
+                <div className="settings-panel-header">
+                  <h2 className="settings-panel-title">Account &amp; Danger Zone</h2>
+                  <p className="settings-panel-subtitle">
+                    Manage your authorization tokens and export telemetry history.
+                  </p>
+                </div>
+
+                {/* Export Telemetry */}
+                <div className="settings-card-row">
+                  <div>
+                    <strong style={{ display: "block", fontSize: "13.5px", color: "#f0fdf4" }}>Export Audit Telemetry</strong>
+                    <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                      Download a structured JSON archive containing all {assets?.length || 0} discovered services, risk telemetry, and remediation notes.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleExportTelemetry}
+                    disabled={exporting}
+                    className="button"
+                    style={{
+                      background: "rgba(74, 222, 128, 0.1)",
+                      border: "1px solid rgba(74, 222, 128, 0.3)",
+                      color: "#4ade80",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      padding: "8px 16px",
+                      minHeight: "36px",
+                    }}
+                  >
+                    <Download size={14} /> {exporting ? "Exporting..." : "Export Audit Telemetry"}
+                  </button>
+                </div>
+
+                {/* Disconnect Google Account */}
+                <div className="settings-card-row" style={{ borderColor: "rgba(248, 113, 113, 0.3)" }}>
+                  <div>
+                    <strong style={{ display: "block", fontSize: "13.5px", color: "#f87171" }}>Disconnect Google Account</strong>
+                    <span style={{ fontSize: "11.5px", color: "#94a3b8" }}>
+                      Revokes local session authorization and disconnects GhostGuard from {effectiveEmail || "Google Workspace"}.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleDisconnect}
+                    className="button"
+                    style={{
+                      background: "rgba(248, 113, 113, 0.15)",
+                      border: "1px solid rgba(248, 113, 113, 0.4)",
+                      color: "#fca5a5",
+                      fontSize: "12px",
+                      fontWeight: 700,
+                      padding: "8px 16px",
+                      minHeight: "36px",
+                    }}
+                  >
+                    <LogOut size={14} /> Disconnect Google Account
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    </DashboardShell>
+  );
 }
 
-function SettingSection({ title, copy, children }) {
-  return <section className="settings-section"><div><h2>{title}</h2><p>{copy}</p></div>{children}</section>;
+function ToggleSwitch({ checked, onChange, id, label }) {
+  return (
+    <button
+      id={id}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      style={{
+        width: "44px",
+        height: "24px",
+        borderRadius: "9999px",
+        background: checked ? "#4ade80" : "rgba(148, 163, 184, 0.2)",
+        border: checked ? "1px solid rgba(74, 222, 128, 0.4)" : "1px solid rgba(148, 163, 184, 0.3)",
+        cursor: "pointer",
+        position: "relative",
+        transition: "all 0.2s ease",
+        boxShadow: checked ? "0 0 10px rgba(74, 222, 128, 0.3)" : "none",
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          top: "2px",
+          left: checked ? "22px" : "2px",
+          width: "18px",
+          height: "18px",
+          borderRadius: "50%",
+          background: checked ? "#0f1813" : "#cbd5e1",
+          transition: "left 0.2s ease, background 0.2s ease",
+        }}
+      />
+    </button>
+  );
 }

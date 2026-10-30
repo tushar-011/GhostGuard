@@ -97,8 +97,8 @@ async function syncTelemetry(isUserScan = false) {
     }
 
     const statsData = await statsRes.json();
-    if (statsData.success && statsData.stats) {
-      const stats = statsData.stats;
+    if (statsData.success && (statsData.stats || statsData.totalDiscovered !== undefined)) {
+      const stats = statsData.stats || statsData;
       const total = stats.totalDiscovered ?? 0;
       const highRisk = stats.highRiskCount ?? 0;
       const dormant = stats.dormantCount ?? 0;

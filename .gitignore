@@ -11,3 +11,7 @@ frontend/out/
 # Frontend environment files
 frontend/.env*
 !frontend/.env.example
+
+data/auth_session.json
+data/*session*.json
+data/*token*.json

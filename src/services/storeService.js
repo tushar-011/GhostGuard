@@ -119,6 +119,27 @@ async function getAccounts() {
 }
 
 /**
+ * Computes audit stats directly from unique store accounts
+ * @returns {Promise<{ totalDiscovered: number, highRiskCount: number, dormantCount: number, reviewedCount: number }>}
+ */
+async function getAuditStats() {
+  const accounts = await getAccounts();
+  const totalDiscovered = accounts.length;
+  const highRiskCount = accounts.filter(
+    (a) => (a.riskLevel && a.riskLevel.toUpperCase() === 'HIGH') || (typeof a.ghostScore === 'number' && a.ghostScore >= 70)
+  ).length;
+  const dormantCount = accounts.filter((a) => a.isDormant || (a.ageInMonths && a.ageInMonths >= 12)).length;
+  const reviewedCount = accounts.filter((a) => a.status && a.status !== 'UNREVIEWED').length;
+
+  return {
+    totalDiscovered,
+    highRiskCount,
+    dormantCount,
+    reviewedCount
+  };
+}
+
+/**
  * Retrieves stored accounts as a domain-keyed dictionary
  * @returns {Promise<Record<string, object>>}
  */
@@ -233,6 +254,7 @@ module.exports = {
   saveAccounts,
   getAccounts,
   getAccountsMap,
+  getAuditStats,
   updateAccountStatus,
   removeAccount,
   clearStore

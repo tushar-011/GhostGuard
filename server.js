@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const authRoutes = require('./src/routes/authRoutes');
 const auditRoutes = require('./src/routes/auditRoutes');
+const { authMiddleware } = require('./src/middleware/authMiddleware');
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use(
   })
 );
 app.use(express.json());
+app.use(authMiddleware);
 
 // Routes
 app.use('/auth', authRoutes);

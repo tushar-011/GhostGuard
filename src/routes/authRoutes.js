@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 const { oauth2Client, SCOPES } = require('../config/googleAuth');
+const firestoreService = require('../services/firestoreService');
+const { isFirebaseConfigured, isInitialized } = require('../config/firebaseAdmin');
 
 const SESSION_FILE = path.join(__dirname, '../../data/auth_session.json');
 let authenticatedUser = null;
@@ -83,16 +85,25 @@ router.get('/google/callback', async (req, res) => {
 
 // 3. Status check endpoint
 router.get('/status', (req, res) => {
-  const isAuthenticated = Boolean(
+  const isGoogleAuthenticated = Boolean(
     oauth2Client.credentials &&
     (oauth2Client.credentials.access_token || oauth2Client.credentials.refresh_token)
   );
+  const isFirebaseAuthenticated = Boolean(req.user && req.user.firebase);
+  const isAuthenticated = isGoogleAuthenticated || isFirebaseAuthenticated;
+
+  const effectiveUser = req.user || (isGoogleAuthenticated ? authenticatedUser : null);
+  const effectiveEmail = req.user?.email || (isGoogleAuthenticated && authenticatedUser ? authenticatedUser.email : null);
+
   res.json({
     success: true,
     authenticated: isAuthenticated,
-    user: isAuthenticated ? authenticatedUser : null,
-    email: isAuthenticated && authenticatedUser ? authenticatedUser.email : null,
-    message: isAuthenticated ? 'Authenticated with Google' : 'Not authenticated'
+    firebase: isFirebaseAuthenticated,
+    user: effectiveUser,
+    email: effectiveEmail,
+    message: isAuthenticated
+      ? (isFirebaseAuthenticated ? 'Authenticated with Firebase' : 'Authenticated with Google')
+      : 'Not authenticated'
   });
 });
 
@@ -111,6 +122,48 @@ router.get('/logout', (req, res) => {
     success: true,
     message: 'Logged out successfully'
   });
+});
+
+// 5. User Profile endpoint
+router.post('/profile', async (req, res) => {
+  try {
+    if (!req.user || !req.user.uid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required to update user profile.'
+      });
+    }
+
+    const { email, displayName, name, settings } = req.body;
+    const profilePayload = {
+      email: email || req.user.email || '',
+      displayName: displayName || name || req.user.name || '',
+      settings: settings || {}
+    };
+
+    const hasFirebase = typeof isInitialized === 'function' ? isInitialized() : Boolean(isFirebaseConfigured);
+    if (hasFirebase && !req.user.isLocal) {
+      const updated = await firestoreService.upsertUserProfile(req.user.uid, profilePayload);
+      return res.json({
+        success: true,
+        source: 'firestore',
+        profile: updated
+      });
+    }
+
+    // Local session update
+    if (authenticatedUser) {
+      authenticatedUser.name = profilePayload.displayName || authenticatedUser.name;
+    }
+    return res.json({
+      success: true,
+      source: 'local',
+      profile: profilePayload
+    });
+  } catch (error) {
+    console.error('Failed to update user profile:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 module.exports = router;

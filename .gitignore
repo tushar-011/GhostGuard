@@ -15,3 +15,9 @@ frontend/.env*
 data/auth_session.json
 data/*session*.json
 data/*token*.json
+
+# Firebase & Service Account Credentials
+serviceAccountKey.json
+*serviceAccountKey*.json
+*service-account*.json
+firebase-admin-key*.json

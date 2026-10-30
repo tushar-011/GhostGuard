@@ -48,6 +48,8 @@ import { useEffect, useState, useRef, createContext, useContext } from "react";
 import DottedIdentityGlobe from "@/components/DottedIdentityGlobe";
 import CategorizedFootprintDirectory from "@/components/CategorizedFootprintDirectory";
 import api, { authApi, auditApi, API_BASE_URL } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { auth } from "@/lib/firebase";
 
 const handleGoogleLogin = () => {
   window.location.href = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/auth/google`;
@@ -222,6 +224,28 @@ export function GhostGuardProvider({ children }) {
       let email = "";
 
       if (typeof window !== "undefined") {
+        if (auth && typeof auth.authStateReady === "function") {
+          try {
+            await auth.authStateReady();
+          } catch {}
+        }
+        if (auth && auth.currentUser) {
+          live = true;
+          email = auth.currentUser.email || email;
+          if (auth.currentUser.displayName) {
+            setUserName(auth.currentUser.displayName);
+          }
+          try {
+            const token = await auth.currentUser.getIdToken();
+            if (token) {
+              window.localStorage.setItem("ghostguard_id_token", token);
+            }
+          } catch {}
+          window.localStorage.setItem("ghostguard_auth", "true");
+          window.localStorage.setItem("ghostguard_mode", "LIVE");
+          if (email) window.localStorage.setItem("ghostguard_email", email);
+        }
+
         const params = new URLSearchParams(window.location.search);
         if (params.get("auth") === "success") {
           live = true;
@@ -245,7 +269,7 @@ export function GhostGuardProvider({ children }) {
           window.localStorage.getItem("ghostguard_mode") === "LIVE"
         ) {
           live = true;
-          email = window.localStorage.getItem("ghostguard_email") || "";
+          email = window.localStorage.getItem("ghostguard_email") || email;
         }
       }
 
@@ -415,6 +439,11 @@ export function GhostGuardProvider({ children }) {
 
   async function logout() {
     try {
+      if (auth && typeof auth.signOut === "function") {
+        await auth.signOut();
+      }
+    } catch {}
+    try {
       await authApi.logout();
     } catch {}
     if (typeof window !== "undefined") {
@@ -422,6 +451,7 @@ export function GhostGuardProvider({ children }) {
       window.localStorage.removeItem("ghostguard_auth");
       window.localStorage.removeItem("ghostguard_mode");
       window.localStorage.removeItem("ghostguard_email");
+      window.localStorage.removeItem("ghostguard_id_token");
     }
     setIsLive(false);
     setUserEmail("");
@@ -616,48 +646,193 @@ export function AuthPage({ mode = "login" }) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const router = useRouter();
-  function submit(event) {
+  const { login: firebaseLogin, signup: firebaseSignup, loginWithGoogle } = useAuth();
+
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setSubmitting(true);
+    try {
+      if (loginWithGoogle) {
+        const user = await loginWithGoogle();
+        if (user) {
+          const email = user.email || "";
+          const name = user.displayName || "";
+          try {
+            await authApi.updateProfile({ displayName: name, email });
+          } catch {}
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("ghostguard_auth", "true");
+            window.localStorage.setItem("ghostguard_mode", "LIVE");
+            if (email) window.localStorage.setItem("ghostguard_email", email);
+            window.localStorage.setItem(
+              "ghostguard-demo-session",
+              JSON.stringify({
+                authenticated: true,
+                isLive: true,
+                email,
+                name,
+                createdAt: Date.now()
+              })
+            );
+          }
+          router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
+          return;
+        }
+      }
+    } catch (googleErr) {
+      console.warn("Firebase Google popup issue, falling back to OAuth redirect:", googleErr.message);
+      if (googleErr.code === "auth/popup-closed-by-user") {
+        setSubmitting(false);
+        return;
+      }
+    }
+    // Fallback to backend Google OAuth redirect
+    handleGoogleLogin();
+  };
+
+  async function submit(event) {
     event.preventDefault();
     if (submitting) return;
     const form = new FormData(event.currentTarget);
-    if (!form.get("email") || (!forgot && !form.get("password")) || (!login && !forgot && !form.get("name"))) {
+    const email = (form.get("email") || "").toString().trim();
+    const password = (form.get("password") || "").toString();
+    const name = (form.get("name") || "").toString().trim();
+    const confirm = (form.get("confirm") || "").toString();
+    const terms = form.get("terms");
+
+    if (!email || (!forgot && !password) || (!login && !forgot && !name)) {
       setError("Please complete the required fields to continue.");
       return;
     }
-    if (!login && !forgot && form.get("password") !== form.get("confirm")) {
+    if (!login && !forgot && password !== confirm) {
       setError("Passwords do not match.");
       return;
     }
-    if (!forgot && !login && !form.get("terms")) {
+    if (!forgot && !login && !terms) {
       setError("Please accept the Terms and Privacy Policy.");
       return;
     }
     setError("");
-    if (login) {
-      const registration = JSON.parse(window.localStorage.getItem("ghostguard-demo-registration") || "null");
-      if (!registration || registration.email !== form.get("email") || registration.password !== form.get("password")) {
-        setError("Use the email and password from your demo registration.");
+    setSubmitting(true);
+
+    try {
+      if (forgot) {
+        if (auth) {
+          const { sendPasswordResetEmail } = await import("firebase/auth");
+          await sendPasswordResetEmail(auth, email);
+        }
+        setSubmitted(true);
+        setSubmitting(false);
         return;
       }
+
+      if (login) {
+        try {
+          if (firebaseLogin) {
+            await firebaseLogin(email, password);
+          }
+        } catch (fbErr) {
+          // Check local demo registration fallback
+          const registration = JSON.parse(window.localStorage.getItem("ghostguard-demo-registration") || "null");
+          if (registration && registration.email === email && registration.password === password) {
+            window.localStorage.setItem("ghostguard-demo-session", JSON.stringify({ email, createdAt: Date.now() }));
+            window.localStorage.setItem("ghostguard_auth", "true");
+            window.localStorage.setItem("ghostguard_mode", "LIVE");
+            window.localStorage.setItem("ghostguard_email", email);
+            router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
+            return;
+          }
+
+          let msg = fbErr.message || "Failed to sign in.";
+          if (fbErr.code === "auth/invalid-credential" || fbErr.code === "auth/user-not-found" || fbErr.code === "auth/wrong-password") {
+            msg = "Invalid email or password. Please check your credentials.";
+          } else if (fbErr.code === "auth/too-many-requests") {
+            msg = "Access temporarily disabled due to many failed login attempts. Try again later.";
+          }
+          setError(msg);
+          setSubmitting(false);
+          return;
+        }
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("ghostguard_auth", "true");
+          window.localStorage.setItem("ghostguard_mode", "LIVE");
+          window.localStorage.setItem("ghostguard_email", email);
+          window.localStorage.setItem(
+            "ghostguard-demo-session",
+            JSON.stringify({
+              authenticated: true,
+              isLive: true,
+              email,
+              createdAt: Date.now()
+            })
+          );
+        }
+        router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
+        return;
+      }
+
+      // Registration / Signup
+      try {
+        if (firebaseSignup) {
+          await firebaseSignup(email, password);
+        }
+      } catch (fbErr) {
+        let msg = fbErr.message || "Failed to create account.";
+        if (fbErr.code === "auth/email-already-in-use") {
+          msg = "An account with this email already exists. Please log in.";
+        } else if (fbErr.code === "auth/weak-password") {
+          msg = "Password should be at least 6 characters.";
+        }
+        setError(msg);
+        setSubmitting(false);
+        return;
+      }
+
+      try {
+        await authApi.updateProfile({
+          displayName: name,
+          email,
+        });
+      } catch (profileErr) {
+        console.warn("Could not save profile metadata:", profileErr.message);
+      }
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("ghostguard_auth", "true");
+        window.localStorage.setItem("ghostguard_mode", "LIVE");
+        window.localStorage.setItem("ghostguard_email", email);
+        window.localStorage.setItem(
+          "ghostguard-demo-registration",
+          JSON.stringify({ name, email, password })
+        );
+        window.localStorage.setItem(
+          "ghostguard-demo-session",
+          JSON.stringify({
+            authenticated: true,
+            isLive: true,
+            email,
+            name,
+            createdAt: Date.now()
+          })
+        );
+      }
+
+      router.push(`/dashboard?auth=success&email=${encodeURIComponent(email)}`);
+    } catch (err) {
+      setError(err.message || "An unexpected error occurred.");
+      setSubmitting(false);
     }
-    setSubmitting(true);
-    if (login) {
-      window.localStorage.setItem("ghostguard-demo-session", JSON.stringify({ email: form.get("email"), createdAt: Date.now() }));
-      router.push("/dashboard");
-      return;
-    }
-    window.localStorage.setItem("ghostguard-demo-registration", JSON.stringify({ name: form.get("name"), email: form.get("email"), password: form.get("password") }));
-    setSubmitted(true);
   }
-  const title = forgot ? "Reset your demo password" : login ? "Log in to your workspace" : "Create your GhostGuard account";
+  const title = forgot ? "Reset your password" : login ? "Log in to your workspace" : "Create your GhostGuard account";
   const eyebrow = forgot ? "Account recovery" : login ? "Welcome back" : "Start with clarity";
-  return <PublicShell><section className="auth-page auth-page-form-only"><div className="auth-form-wrap"><div className="auth-form"><div className="mobile-auth-logo"><Logo /></div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p className="auth-subtitle">{forgot ? "Enter your email to receive a frontend-only recovery confirmation." : login ? "Use the demo form below to explore the experience." : "This creates a frontend demo state only — you will continue to login before opening the dashboard."}</p>{submitted ? <div className="success-panel"><span className="success-icon"><Check /></span><h3>{forgot ? "Demo recovery request ready" : "Demo registration complete"}</h3><p>{forgot ? "This is a frontend-only experience. No email was sent." : "Your demo registration is ready. Log in to continue to the dashboard."}</p><Link href="/login" className="button button-primary">{forgot ? "Return to login" : "Continue to login"} <ArrowRight size={16} /></Link></div> : <>
+  return <PublicShell><section className="auth-page auth-page-form-only"><div className="auth-form-wrap"><div className="auth-form"><div className="mobile-auth-logo"><Logo /></div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p className="auth-subtitle">{forgot ? "Enter your email to receive recovery instructions." : login ? "Log in to access your digital security workspace." : "Create your account to start auditing and securing your digital footprint."}</p>{submitted ? <div className="success-panel"><span className="success-icon"><Check /></span><h3>{forgot ? "Recovery instructions sent" : "Account ready"}</h3><p>{forgot ? "Check your email for instructions to reset your password." : "Your account is ready. Log in to continue to the dashboard."}</p><Link href="/login" className="button button-primary">{forgot ? "Return to login" : "Continue to login"} <ArrowRight size={16} /></Link></div> : <>
   {!forgot && (
     <>
       <button
         type="button"
         className="button button-google button-full"
-        onClick={handleGoogleLogin}
+        onClick={handleGoogleSignIn}
         style={{
           display: "flex",
           alignItems: "center",
@@ -691,7 +866,7 @@ export function AuthPage({ mode = "login" }) {
       </div>
     </>
   )}
-  <form onSubmit={submit} noValidate>{!login && !forgot && <label>Full name<input name="name" placeholder="Alex Morgan" /></label>}<label>Email address<input name="email" type="email" placeholder="you@example.com" required /></label>{!forgot && <label>Password<div className="password-input"><input name="password" type={showPassword ? "text" : "password"} placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>}{!login && !forgot && <label>Confirm password<input name="confirm" type={showPassword ? "text" : "password"} placeholder="••••••••" required /></label>}{login ? <div className="form-row"><label className="checkbox"><input type="checkbox" name="remember" /> <span>Remember me</span></label><Link href="/forgot-password">Forgot password?</Link></div> : !forgot && <label className="checkbox"><input type="checkbox" required name="terms" /> <span>I agree to the <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>.</span></label>}{error && <p className="form-error">{error}</p>}<button className="button button-primary button-full" type="submit" disabled={submitting}>{submitting ? <><GhostGuardLoader inline /> Processing demo request</> : <>{forgot ? "Send demo recovery email" : login ? "Log in to demo" : "Create demo account"} <ArrowRight size={16} /></>}</button></form></>}<p className="auth-switch">{forgot ? "Remembered your password?" : login ? "New to GhostGuard?" : "Already have an account?"} <Link href={forgot || !login ? "/login" : "/signup"}>{forgot || !login ? "Log in" : "Create an account"}</Link></p></div></div></section></PublicShell>;
+  <form onSubmit={submit} noValidate>{!login && !forgot && <label>Full name<input name="name" placeholder="Alex Morgan" /></label>}<label>Email address<input name="email" type="email" placeholder="you@example.com" required /></label>{!forgot && <label>Password<div className="password-input"><input name="password" type={showPassword ? "text" : "password"} placeholder="••••••••" required /><button type="button" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>}{!login && !forgot && <label>Confirm password<input name="confirm" type={showPassword ? "text" : "password"} placeholder="••••••••" required /></label>}{login ? <div className="form-row"><label className="checkbox"><input type="checkbox" name="remember" /> <span>Remember me</span></label><Link href="/forgot-password">Forgot password?</Link></div> : !forgot && <label className="checkbox"><input type="checkbox" required name="terms" /> <span>I agree to the <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>.</span></label>}{error && <p className="form-error">{error}</p>}<button className="button button-primary button-full" type="submit" disabled={submitting}>{submitting ? <><GhostGuardLoader inline /> Processing...</> : <>{forgot ? "Send recovery email" : login ? "Log in" : "Create account"} <ArrowRight size={16} /></>}</button></form></>}<p className="auth-switch">{forgot ? "Remembered your password?" : login ? "New to GhostGuard?" : "Already have an account?"} <Link href={forgot || !login ? "/login" : "/signup"}>{forgot || !login ? "Log in" : "Create an account"}</Link></p></div></div></section></PublicShell>;
 }
 
 export function PageHero({ eyebrow, title, copy }) {
@@ -856,6 +1031,11 @@ export function DashboardShell({ children, title, description }) {
   const handleLogout = async () => {
     setIsProfileMenuOpen(false);
     try {
+      if (auth && typeof auth.signOut === "function") {
+        await auth.signOut();
+      }
+    } catch {}
+    try {
       await authApi.logout();
     } catch {}
     if (typeof window !== "undefined") {
@@ -863,6 +1043,7 @@ export function DashboardShell({ children, title, description }) {
       window.localStorage.removeItem("ghostguard_auth");
       window.localStorage.removeItem("ghostguard_mode");
       window.localStorage.removeItem("ghostguard_email");
+      window.localStorage.removeItem("ghostguard_id_token");
       // Clear all local cookies
       document.cookie.split(";").forEach((c) => {
         document.cookie = c
@@ -2549,6 +2730,11 @@ export function SettingsPage() {
       return;
     }
     try {
+      if (auth && typeof auth.signOut === "function") {
+        await auth.signOut();
+      }
+    } catch {}
+    try {
       await authApi.logout();
     } catch {}
     if (typeof window !== "undefined") {
@@ -2556,6 +2742,7 @@ export function SettingsPage() {
       window.localStorage.removeItem("ghostguard_auth");
       window.localStorage.removeItem("ghostguard_mode");
       window.localStorage.removeItem("ghostguard_email");
+      window.localStorage.removeItem("ghostguard_id_token");
       document.cookie.split(";").forEach((c) => {
         document.cookie = c
           .replace(/^ +/, "")

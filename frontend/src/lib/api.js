@@ -3,6 +3,8 @@
  * Centralized service layer for communicating with the GhostGuard Node.js/Express backend.
  */
 
+import { auth } from './firebase';
+
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
@@ -14,13 +16,42 @@ export const API_BASE_URL =
  */
 async function fetchApi(endpoint, options = {}) {
   const url = `${API_BASE_URL}${endpoint}`;
+
+  // Automatically attach Firebase ID token if available
+  const headers = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  if (!headers['Authorization'] && typeof window !== 'undefined') {
+    try {
+      if (auth && typeof auth.authStateReady === 'function') {
+        await auth.authStateReady();
+      }
+      if (auth && auth.currentUser) {
+        const idToken = await auth.currentUser.getIdToken();
+        if (idToken) {
+          headers['Authorization'] = `Bearer ${idToken}`;
+          window.localStorage.setItem('ghostguard_id_token', idToken);
+        }
+      } else {
+        const cachedToken = window.localStorage.getItem('ghostguard_id_token');
+        if (cachedToken) {
+          headers['Authorization'] = `Bearer ${cachedToken}`;
+        }
+      }
+    } catch (e) {
+      const cachedToken = window.localStorage.getItem('ghostguard_id_token');
+      if (cachedToken) {
+        headers['Authorization'] = `Bearer ${cachedToken}`;
+      }
+    }
+  }
+
   const config = {
     credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
     ...options,
+    headers,
   };
 
   try {
@@ -79,6 +110,18 @@ export const authApi = {
    */
   logout: async () => {
     return fetchApi('/auth/logout');
+  },
+
+  /**
+   * Updates user profile in Firestore
+   * @param {object} profileData
+   * @returns {Promise<{ success: boolean, profile: any }>}
+   */
+  updateProfile: async (profileData) => {
+    return fetchApi('/auth/profile', {
+      method: 'POST',
+      body: JSON.stringify(profileData),
+    });
   },
 };
 

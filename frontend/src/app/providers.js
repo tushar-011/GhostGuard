@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GhostGuardLoader, ThemeProvider, GhostGuardProvider } from "@/components/ghostguard";
+import { AuthProvider } from "@/context/AuthContext";
 
 export default function Providers({ children }) {
   const [ready, setReady] = useState(false);
@@ -22,9 +23,11 @@ export default function Providers({ children }) {
 
   return (
     <ThemeProvider>
-      <GhostGuardProvider>
-        {ready ? children : <GhostGuardLoader />}
-      </GhostGuardProvider>
+      <AuthProvider>
+        <GhostGuardProvider>
+          {ready ? children : <GhostGuardLoader />}
+        </GhostGuardProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

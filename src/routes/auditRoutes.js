@@ -6,6 +6,13 @@ const { extractServiceMetadata } = require('../services/parserService');
 const { evaluateRisk } = require('../services/riskEngine');
 const storeService = require('../services/storeService');
 const { generateMindMapGraph } = require('../services/graphService');
+const { isFirebaseConfigured, isInitialized } = require('../config/firebaseAdmin');
+const firestoreService = require('../services/firestoreService');
+
+function isCloudActive(req) {
+  const initialized = typeof isInitialized === 'function' ? isInitialized() : Boolean(isFirebaseConfigured);
+  return initialized && Boolean(req && req.user && req.user.uid && !req.user.isLocal);
+}
 
 /**
  * Helper to generate mock email discovery dataset for testing/demos
@@ -93,6 +100,23 @@ router.get('/scan', async (req, res) => {
       console.log('[Audit] Using mock discovery email dataset for scan...');
       rawEmails = getMockRawEmails();
     } else {
+      if (isCloudActive(req)) {
+        try {
+          const existingCloud = await firestoreService.getUserThreats(req.user.uid);
+          if (existingCloud && existingCloud.length > 0 && req.query.rescan !== 'true') {
+            console.log(`[Audit] Active session has ${existingCloud.length} threats in Firestore for UID ${req.user.uid}`);
+            return res.json({
+              success: true,
+              mode: 'firestore-store',
+              count: existingCloud.length,
+              assets: existingCloud
+            });
+          }
+        } catch (fsErr) {
+          console.warn('[Audit] Failed checking existing Firestore threats:', fsErr.message);
+        }
+      }
+
       if (!oauth2Client.credentials || !oauth2Client.credentials.access_token) {
         // Fallback: If we already have stored audited accounts from a previous scan, return them!
         const existingStored = await storeService.getAccounts();
@@ -129,6 +153,29 @@ router.get('/scan', async (req, res) => {
 
     console.log(`[Audit] Scan completed and saved. Total accounts in store: ${persistedAccounts.length}`);
 
+    // Bridge to Firestore if Firebase is configured and user is authenticated
+    if (isCloudActive(req)) {
+      try {
+        await firestoreService.saveAuditScan(
+          req.user.uid,
+          scoredAccounts,
+          computeAuditStats(persistedAccounts)
+        );
+        const userThreats = await firestoreService.getUserThreats(req.user.uid);
+        if (userThreats && userThreats.length > 0) {
+          return res.json({
+            success: true,
+            mode: isMock ? 'mock' : 'firestore',
+            count: userThreats.length,
+            assets: userThreats,
+            batchDiscoveredCount: scoredAccounts.length
+          });
+        }
+      } catch (fsErr) {
+        console.warn('[Audit] Firestore save warning:', fsErr.message);
+      }
+    }
+
     res.json({
       success: true,
       mode: isMock ? 'mock' : 'live',
@@ -156,10 +203,26 @@ router.get('/scan', async (req, res) => {
 
 /**
  * 1b. GET /api/audit/accounts
- * Returns all saved audited accounts directly from state store.
+ * Returns all saved audited accounts directly from state store or Firestore.
  */
 router.get('/accounts', async (req, res) => {
   try {
+    if (isCloudActive(req)) {
+      try {
+        const userThreats = await firestoreService.getUserThreats(req.user.uid);
+        if (userThreats && userThreats.length > 0) {
+          return res.json({
+            success: true,
+            count: userThreats.length,
+            assets: userThreats,
+            source: 'firestore'
+          });
+        }
+      } catch (fsErr) {
+        console.warn('[Audit] Firestore getAccounts warning:', fsErr.message);
+      }
+    }
+
     const accounts = await storeService.getAccounts();
     res.json({
       success: true,
@@ -178,7 +241,17 @@ router.get('/accounts', async (req, res) => {
  */
 router.get('/graph', async (req, res) => {
   try {
-    let accounts = await storeService.getAccounts();
+    let accounts = [];
+
+    if (isCloudActive(req)) {
+      try {
+        accounts = await firestoreService.getUserThreats(req.user.uid);
+      } catch {}
+    }
+
+    if (accounts.length === 0) {
+      accounts = await storeService.getAccounts();
+    }
 
     // If store is empty and ?mock=true is requested, generate mock scan first
     if (accounts.length === 0 && (req.query.mock === 'true' || req.query.demo === 'true')) {
@@ -301,7 +374,40 @@ router.post('/action', async (req, res) => {
 
     const cleanAction = action.toUpperCase().trim();
 
-    // Handle permanent asset removal
+    // Firestore Integration: update or remove record in users/{uid}/threats/{domain}
+    if (isCloudActive(req)) {
+      try {
+        if (cleanAction === 'REMOVE_RECORD' || cleanAction === 'DELETE_RECORD') {
+          await firestoreService.removeThreatRecord(req.user.uid, domain);
+          await storeService.removeAccount(domain);
+          const remainingAccounts = await firestoreService.getUserThreats(req.user.uid);
+          const updatedStats = computeAuditStats(remainingAccounts);
+
+          return res.json({
+            success: true,
+            removedDomain: domain,
+            message: `Threat record for "${domain}" permanently removed from Firestore.`,
+            stats: updatedStats
+          });
+        }
+
+        const updatedThreat = await firestoreService.updateThreatAction(req.user.uid, domain, cleanAction, notes);
+        await storeService.updateAccountStatus(domain, cleanAction, notes);
+        const remainingAccounts = await firestoreService.getUserThreats(req.user.uid);
+        const updatedStats = computeAuditStats(remainingAccounts);
+
+        return res.json({
+          success: true,
+          message: `Threat status for "${domain}" successfully updated to "${cleanAction}" in Firestore.`,
+          account: updatedThreat,
+          stats: updatedStats
+        });
+      } catch (fsErr) {
+        console.warn('[Audit] Firestore action warning:', fsErr.message);
+      }
+    }
+
+    // Local state fallback
     if (cleanAction === 'REMOVE_RECORD' || cleanAction === 'DELETE_RECORD') {
       await storeService.removeAccount(domain);
       const remainingAccounts = await storeService.getAccounts();
@@ -345,6 +451,24 @@ router.delete('/asset/:domain', async (req, res) => {
         success: false,
         error: 'Missing domain in delete request.'
       });
+    }
+
+    if (isCloudActive(req)) {
+      try {
+        await firestoreService.removeThreatRecord(req.user.uid, domain);
+        await storeService.removeAccount(domain);
+        const remainingAccounts = await firestoreService.getUserThreats(req.user.uid);
+        const updatedStats = computeAuditStats(remainingAccounts);
+
+        return res.json({
+          success: true,
+          removedDomain: domain,
+          message: `Threat record for "${domain}" successfully deleted from Firestore.`,
+          stats: updatedStats
+        });
+      } catch (fsErr) {
+        console.warn('[Audit] Firestore delete asset warning:', fsErr.message);
+      }
     }
 
     await storeService.removeAccount(domain);
@@ -402,7 +526,19 @@ router.delete('/cache', async (req, res) => {
  */
 router.get('/stats', async (req, res) => {
   try {
-    let accounts = await storeService.getAccounts();
+    let accounts = [];
+
+    if (isCloudActive(req)) {
+      try {
+        accounts = await firestoreService.getUserThreats(req.user.uid);
+      } catch (fsErr) {
+        console.warn('[Audit] Firestore stats warning:', fsErr.message);
+      }
+    }
+
+    if (accounts.length === 0) {
+      accounts = await storeService.getAccounts();
+    }
 
     // If store is empty and ?mock=true is requested, generate mock data for demo
     if (accounts.length === 0 && (req.query.mock === 'true' || req.query.demo === 'true')) {

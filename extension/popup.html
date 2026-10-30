@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GhostGuard Auditor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C7.58 2 4 5.58 4 10C4 13.04 5.7 15.68 8.21 17.03C8.42 17.14 8.57 17.34 8.61 17.58L9.04 20.17C9.13 20.73 9.7 21.08 10.24 20.91L11.58 20.49C11.85 20.4 12.15 20.4 12.42 20.49L13.76 20.91C14.3 21.08 14.87 20.73 14.96 20.17L15.39 17.58C15.43 17.34 15.58 17.14 15.79 17.03C18.3 15.68 20 13.04 20 10C20 5.58 16.42 2 12 2Z" fill="url(#ghostGrad)" stroke="#818cf8" stroke-width="1.2"/>
+            <circle cx="9.5" cy="9.5" r="1.5" fill="#0f172a"/>
+            <circle cx="14.5" cy="9.5" r="1.5" fill="#0f172a"/>
+            <defs>
+              <linearGradient id="ghostGrad" x1="4" y1="2" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#818cf8"/>
+                <stop offset="1" stop-color="#c084fc"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">GhostGuard</h1>
+          <span class="brand-subtitle">Asset & Ghost Town Auditor</span>
+        </div>
+      </div>
+      <div id="connectionStatus" class="status-badge disconnected" title="Backend connection status">
+        <span class="status-dot"></span>
+        <span id="statusText">Offline</span>
+      </div>
+    </header>
+
+    <!-- Auth Required Banner (Hidden by default) -->
+    <div id="authBanner" class="auth-banner hidden">
+      <div class="auth-banner-content">
+        <div class="auth-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <div class="auth-text">
+          <strong>Authentication Required</strong>
+          <p>Connect your Google account to audit your inbox for orphaned accounts.</p>
+        </div>
+      </div>
+      <button id="btnAuthenticate" class="btn btn-primary btn-sm btn-block">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-6h2v6zm4 0h-2v-6h2v6zm-2-8a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/>
+        </svg>
+        Authenticate with Google
+      </button>
+    </div>
+
+    <!-- Metrics Bar -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <span class="metric-label">Total Assets</span>
+        <span id="statTotal" class="metric-value">--</span>
+      </div>
+      <div class="metric-card warning">
+        <span class="metric-label">Ghost / Dormant</span>
+        <span id="statDormant" class="metric-value">--</span>
+      </div>
+      <div class="metric-card danger">
+        <span class="metric-label">High Risk</span>
+        <span id="statHighRisk" class="metric-value">--</span>
+      </div>
+    </section>
+
+    <!-- Quick Actions Toolbar -->
+    <section class="actions-toolbar">
+      <button id="btnScanInbox" class="btn btn-action" title="Scan Gmail inbox for registered services">
+        <span id="scanSpinner" class="spinner hidden"></span>
+        <svg id="scanIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/>
+          <path d="m21 21-4.3-4.3"/>
+          <path d="M11 8v6M8 11h6"/>
+        </svg>
+        <span id="scanBtnText">Scan Inbox</span>
+      </button>
+
+      <button id="open-dashboard-btn" class="btn btn-secondary" title="Open full interactive mind map & analytics">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="3" y1="9" x2="21" y2="9"/>
+          <line x1="9" y1="21" x2="9" y2="9"/>
+        </svg>
+        <span>Dashboard</span>
+      </button>
+    </section>
+
+    <!-- Feed Section -->
+    <section class="findings-section">
+      <div class="section-header">
+        <h2 class="section-title">Audited Services</h2>
+        <span id="findingsCount" class="findings-count">0 items</span>
+      </div>
+
+      <!-- Feed Container -->
+      <div id="findingsList" class="findings-list">
+        <!-- Dynamic items populated by popup.js -->
+        <div class="empty-state">
+          <div class="empty-icon">👻</div>
+          <p class="empty-title">No Audit Findings Yet</p>
+          <p class="empty-sub">Click "Scan Inbox" to discover registered services and evaluate orphaned assets.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span class="footer-meta">GhostGuard v1.0 • Local Host: 5000</span>
+      <button id="btnRefresh" class="footer-btn" title="Refresh local telemetry">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+      </button>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

@@ -2,7 +2,7 @@
 
 # 🛡️ GhostGuard
 
-### Autonomous Orphaned Identity & Digital Footprint Auditor
+### Autonomous Orphaned Identity, Breach Intelligence & Digital Footprint Auditor
 
 [![Next.js](https://img.shields.io/badge/Next.js-14+-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
@@ -11,9 +11,9 @@
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Manifest%20V3-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://developer.chrome.com/docs/extensions/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald?style=for-the-badge)](LICENSE)
 
-*Discover, analyze, score, and remediate forgotten registrations, dormant accounts, and unmonitored attack surfaces across your digital life.*
+*Discover, track, score, and remediate forgotten registrations, exposed credentials, and dormant attack surfaces across your digital perimeter.*
 
-[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [Database Schema](#-firestore-schema) • [Remediation Workflow](#-remediation-engine)
+[Features](#-key-features) • [Architecture](#-architecture) • [Getting Started](#-getting-started) • [Database Schema](#-firestore-schema) • [Remediation & Protocols](#-remediation-engine--safety-protocols)
 
 </div>
 
@@ -21,27 +21,30 @@
 
 ## 💡 The Problem
 
-Every year, an average Internet user signs up for dozens of digital platforms, newsletters, dev tools, and web apps. Over time, these become **orphaned accounts**:
-- **Forgotten & Unmonitored:** Users lose track of which services store their personal data.
-- **Reused Passwords:** Forgotten logins frequently use older passwords that are vulnerable to credential stuffing.
-- **Silent Data Breaches:** When a dormant third-party service suffers a security incident, users remain unaware while their exposed credentials circulate on the dark web.
+Over years of online activity, internet users accumulate hundreds of SaaS accounts, developer sandboxes, newsletters, and consumer services. Eventually, these become **orphaned accounts**:
+- **Forgotten Attack Surfaces:** Users lose visibility into which third parties retain their personal records, OAuth permissions, and profile data.
+- **Credential Cascades:** Dormant accounts frequently host older, reused passwords that remain susceptible to credential stuffing attacks.
+- **Silent Exposure:** When a legacy platform suffers a security breach, users often discover their compromised records years later—if at all.
 
-**GhostGuard solves this** by non-intrusively auditing registration receipts, OAuth links, and confirmation artifacts directly from your Gmail inbox, constructing an interactive digital footprint map, calculating an automated **Ghost Risk Score**, and offering actionable remediation workflows.
+**GhostGuard solves this** by evaluating account confirmation headers and authentication artifacts directly through Gmail, constructing an interactive digital footprint map, computing dynamic **Ghost Risk Scores**, cross-referencing breach disclosures, and enabling granular or emergency perimeter remediation.
 
 ---
 
 ## ✨ Key Features
 
-- 🔍 **Zero-Knowledge Inbox Discovery:** Scans Gmail headers and registration confirmations to catalog registered services without reading or saving personal email contents.
-- 📊 **Multi-Factor Ghost Scoring:** Calculates risk per service ($0-100$) by factoring in account dormancy, domain sensitivity (financial, developer, productivity, general), and credential hygiene.
-- 🌐 **Interactive Footprint Directory:** Categorized service breakdown with dynamic filtering (Financial, Developer, Productivity, Social, General) and risk pills.
-- ⚡ **Real-Time Remediation Hub:**
-  - **Keep:** Explicitly approve trusted accounts and mark them as reviewed.
-  - **Secure:** Direct routing to service password and security panels to reset credentials.
-  - **Revoke:** One-click launchpad to Google Account Security permissions for OAuth token revocation.
-  - **Remove Record:** Purge cataloged entries and update live telemetry in real time.
-- 🔐 **Dual Auth & Multi-User Isolation:** Firebase Email/Password and Google OAuth with seamless Firestore persistence. Actions survive across sessions and devices.
-- 🧩 **Synchronized Chrome Extension (Manifest V3):** Real-time workspace telemetry monitor featuring health checks, total asset counts, and immediate threat counts styled in GhostGuard's moss-forest aesthetic.
+- 🔍 **Zero-Knowledge Inbox Discovery:** Audits Gmail message headers and registration receipts without inspecting, ingesting, or storing personal email contents.
+- 📊 **Multi-Factor Ghost Scoring:** Dynamically evaluates risk ($0-100$) by weighting service sensitivity, account dormancy periods, and authentication structures.
+- 📅 **Digital Footprint Timeline:** An interactive chronological visualization mapping account creation dates, scan discoveries, dormancy milestones, and security reviews.
+- 🚨 **BreachWatch™ Exposure Monitor:** Correlates cataloged services against verified historical data breach databases to surface compromised data classes (passwords, PII) and guide remediation.
+- 🤖 **GhostAI Security Advisor:** An intelligent copilot grounded in live footprint context to answer queries and prioritize risk while keeping all destructive actions strictly user-controlled.
+- ⚠️ **Emergency Dead Man's Switch:** A password-protected kill-switch protocol inside the security vault that stages all registered entities for bulk decommissioning (`MARKED_FOR_DELETION`) with 1-click disarm capability.
+- ⚡ **Granular Remediation Workflows:**
+  - **Keep:** Explicitly approve and verify trusted assets.
+  - **Secure:** Direct routing to targeted credential and password change endpoints.
+  - **Revoke:** Direct launchpad to Google Account Third-Party Security panels.
+  - **Remove Record:** Purge footprint entries and instantly recalibrate telemetry counters.
+- 🔐 **Dual Authentication & Multi-Tenant Isolation:** Firebase Email/Password and Google OAuth integrations backed by persistent, user-scoped Cloud Firestore rules.
+- 🧩 **Real-Time Chrome Extension (Manifest V3):** Features active-tab domain detection, live in-browser security badges, immediate risk flags, and quick-action remediation controls.
 
 ---
 
@@ -50,7 +53,8 @@ Every year, an average Internet user signs up for dozens of digital platforms, n
 ```text
 ┌────────────────────────────────────────────────────────┐
 │             Next.js 14 Frontend Client                 │
-│  (Dark Forest UI, Tabbed Settings, Live Inventory Map) │
+│  (Dark Forest UI, Footprint Timeline, BreachWatch,     │
+│   GhostAI Copilot, Emergency Dead Man's Switch Vault)  │
 └──────────────────────────┬─────────────────────────────┘
                            │
              Bearer Firebase ID Token (JWT)
@@ -58,7 +62,7 @@ Every year, an average Internet user signs up for dozens of digital platforms, n
                            ▼
 ┌────────────────────────────────────────────────────────┐
 │               Node.js / Express Backend                │
-│   (Auth Middleware, Risk Engine, Gmail Parser SDK)     │
+│  (Auth Middleware, Risk Engine, Breach Engine, LLM API)│
 └───────────────┬────────────────────────┬───────────────┘
                 │                        │
   Google OAuth2 Read Tokens              │ Firebase Admin SDK
@@ -73,20 +77,20 @@ Every year, an average Internet user signs up for dozens of digital platforms, n
 
 ## 🗄️ Firestore Schema
 
-User data and remediation states are isolated by Firebase `uid`:
+User state, threat catalogs, and audit logs are strictly scoped by Firebase `uid`:
 
 ```text
 users/{uid}
  ├── profile
- │    └── email, displayName, createdAt, settings
+ │    └── email, displayName, deadManArmed, createdAt, settings
  ├── connectedAccounts/gmail
  │    └── provider, email, connectionStatus, connectedAt
  ├── scans/{scanId}
  │    └── timestamp, totalDiscovered, highRiskCount, rawCount
  ├── threats/{domain}
- │    └── serviceName, domain, category, ghostScore, riskLevel, status, lastDetected
+ │    └── serviceName, domain, category, ghostScore, riskLevel, status, previousStatus, detectedDate
  └── auditLogs/{logId}
-      └── action (REMEDIATION_KEPT, REMEDIATION_SECURED, etc.), targetId, timestamp
+      └── action (REMEDIATION_KEPT, DEAD_MAN_SWITCH_TRIGGERED, etc.), targetId, timestamp
 ```
 
 ---
@@ -96,22 +100,25 @@ users/{uid}
 ### Prerequisites
 - **Node.js** v18.0.0 or higher
 - **npm** v9.0.0 or higher
-- A **Google Cloud Console** project with the Gmail API enabled and OAuth credentials configured.
-- A **Firebase** project with Authentication (Email/Password & Google) and Cloud Firestore enabled.
+- A **Google Cloud Console** project with the Gmail API enabled and OAuth 2.0 Client IDs generated.
+- A **Firebase** project with Authentication (Email/Password & Google) and Cloud Firestore initialized.
 
-### 1. Clone the Repository
+### 1. Clone & Install Dependencies
 ```bash
 git clone https://github.com/tushar-011/GhostGuard.git
 cd GhostGuard
-```
 
-### 2. Backend Setup
-Install dependencies:
-```bash
+# Install backend dependencies
 npm install
+
+# Install frontend dependencies
+cd frontend
+npm install
+cd ..
 ```
 
-Configure environment variables in `.env`:
+### 2. Backend Configuration
+Create a `.env` file in the project root:
 ```env
 PORT=5000
 FRONTEND_URL=http://localhost:3000
@@ -124,213 +131,73 @@ GOOGLE_REDIRECT_URI=http://localhost:5000/auth/google/callback
 # Firebase Admin SDK
 FIREBASE_PROJECT_ID=ghostguard-4db57
 FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
+
+# Optional: AI Security Advisor (Gemini API)
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
-Place your Firebase Admin private key at the root of the project as `serviceAccountKey.json` (already excluded via `.gitignore`).
+Place your downloaded Firebase private key in the project root as `serviceAccountKey.json` (protected by `.gitignore`).
 
 Start the backend:
 ```bash
 npm run dev
 ```
 
-### 3. Frontend Setup
-Navigate to the frontend directory:
-```bash
-cd frontend
-npm install
-```
-
-Configure environment variables in `frontend/.env.local`:
+### 3. Frontend Configuration
+Create `frontend/.env.local`:
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:5000
 
 # Firebase Client SDK
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
+NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=ghostguard-4db57.firebaseapp.com
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=ghostguard-4db57
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=ghostguard-4db57.firebasestorage.app
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=808611102393
-NEXT_PUBLIC_FIREBASE_APP_ID=1:808611102393:web:...
-NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-...
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_messaging_sender_id
+NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=your_measurement_id
 ```
 
-Start the Next.js development server:
+Start the frontend:
 ```bash
+cd frontend
 npm run dev
 ```
 
-Open `http://localhost:3000` in your browser.
+Navigate to `http://localhost:3000` in your browser.
 
 ### 4. Chrome Extension Setup
-1. Open Google Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** using the toggle switch in the top right.
-3. Click **Load unpacked** in the top left.
-4. Select the `extension/` folder located inside the GhostGuard project.
-5. The GhostGuard icon will appear in your Chrome toolbar, synchronizing live telemetry with `http://localhost:5000`.
+1. Open Google Chrome and visit `chrome://extensions/`.
+2. Toggle on **Developer mode** in the top-right corner.
+3. Click **Load unpacked** and select the `extension/` folder in the project root.
+4. The GhostGuard shield icon will appear in the toolbar, monitoring active tabs and connecting with the backend API.
 
 ---
 
-## 🛡️ Remediation Engine
+## 🛡️ Remediation Engine & Safety Protocols
 
-When GhostGuard audits an account, it assigns one of the following remediation states, stored directly in Cloud Firestore:
+### Lifecycle States
 
-| Status | Label | Description | Action Triggered |
+| Status | UI Badge | Description | Trigger |
 | :--- | :--- | :--- | :--- |
-| `UNREVIEWED` | Needs Attention | Discovered asset pending user review. | Initial audit scan |
-| `KEPT` | Retained | Verified active service trusted by the user. | `POST /api/audit/action` -> `KEPT` |
-| `SECURED` | Secured | Credentials updated, 2FA enabled, or password changed. | `POST /api/audit/action` -> `SECURED` |
-| `REVOKED` | Revoked | Third-party access revoked via Google OAuth settings. | `POST /api/audit/action` -> `REVOKED` |
-| `DELETED` | Removed | Purged from threat directory and audit footprint. | `DELETE /api/audit/asset/:domain` |
+| `UNREVIEWED` | Needs Attention | Discovered service pending user evaluation. | Initial inbox audit |
+| `KEPT` | Retained | Verified service acknowledged and retained. | Manual approval |
+| `SECURED` | Secured | Credentials rotated, 2FA enabled, or settings reviewed. | Password reset action |
+| `REVOKED` | Revoked | Third-party access severed via Google Account permissions. | OAuth revocation flow |
+| `MARKED_FOR_DELETION` | Queued Deletion | Staged for decommissioning individually or via Dead Man's Switch. | Manual tag or Emergency protocol |
+| `DELETED` | Removed | Purged from threat directory and audit telemetry. | Complete record removal |
+
+### Emergency Protocol: Dead Man's Switch
+Located inside **Settings > Security & Danger Zone**:
+- **Re-Authentication Barrier:** Requires verifying password credentials (or re-authenticating with Google) and entering confirmation text (`"PURGE"`) before execution.
+- **Coordinated Staging:** Transitions every discovered asset in Firestore to `MARKED_FOR_DELETION` without destructive, irreversible remote calls during staging.
+- **Active Warning & Disarm Protocol:** Displays an emergency warning ribbon across the dashboard, enabling users to disarm the switch and restore previous account states instantly.
 
 ---
 
 ## 🔒 Security & Privacy Guarantees
 
-- **No Plaintext Passwords:** GhostGuard never collects, stores, transmits, or inspects passwords.
-- **Zero Raw Email Storage:** Gmail messages are evaluated ephemerally in-memory to detect authentication domains and discarded immediately.
-- **Secret Scanning Safeguards:** All service account keys, session tokens, and local cache databases are permanently ignored via `.gitignore` to prevent secret exposure.
-- **Multi-Tenant Isolation:** All database reads and writes are strictly scoped to the authenticated caller's Firebase `uid`.
-
-```text
-┌────────────────────────────────────────────────────────┐
-│             Next.js 14 Frontend Client                 │
-│  (Dark Forest UI, Tabbed Settings, Live Inventory Map) │
-└──────────────────────────┬─────────────────────────────┘
-                           │
-             Bearer Firebase ID Token (JWT)
-                           │
-                           ▼
-┌────────────────────────────────────────────────────────┐
-│               Node.js / Express Backend                │
-│   (Auth Middleware, Risk Engine, Gmail Parser SDK)     │
-└───────────────┬────────────────────────┬───────────────┘
-                │                        │
-  Google OAuth2 Read Tokens              │ Firebase Admin SDK
-                ▼                        ▼
-┌────────────────────────┐  ┌─────────────────────────┐
-│      Google APIs       │  │     Cloud Firestore     │
-│    (Gmail Readonly)    │  │  (Multi-User Isolation) │
-└────────────────────────┘  └─────────────────────────┘
-```
-
----
-
-## 🗄️ Firestore Schema
-
-User data and remediation states are isolated by Firebase `uid`:
-
-```text
-users/{uid}
- ├── profile
- │    └── email, displayName, createdAt, settings
- ├── connectedAccounts/gmail
- │    └── provider, email, connectionStatus, connectedAt
- ├── scans/{scanId}
- │    └── timestamp, totalDiscovered, highRiskCount, rawCount
- ├── threats/{domain}
- │    └── serviceName, domain, category, ghostScore, riskLevel, status, lastDetected
- └── auditLogs/{logId}
-      └── action (REMEDIATION_KEPT, REMEDIATION_SECURED, etc.), targetId, timestamp
-```
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- **Node.js** v18.0.0 or higher
-- **npm** v9.0.0 or higher
-- A **Google Cloud Console** project with the Gmail API enabled and OAuth credentials configured.
-- A **Firebase** project with Authentication (Email/Password & Google) and Cloud Firestore enabled.
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/tushar-011/GhostGuard.git
-cd GhostGuard
-```
-
-### 2. Backend Setup
-Install dependencies:
-```bash
-npm install
-```
-
-Configure environment variables in `.env`:
-```env
-PORT=5000
-FRONTEND_URL=http://localhost:3000
-
-# Google OAuth Credentials (for Gmail Audit)
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_REDIRECT_URI=http://localhost:5000/auth/google/callback
-
-# Firebase Admin SDK
-FIREBASE_PROJECT_ID=ghostguard-4db57
-FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
-```
-
-Place your Firebase Admin private key at the root of the project as `serviceAccountKey.json` (already excluded via `.gitignore`).
-
-Start the backend:
-```bash
-npm run dev
-```
-
-### 3. Frontend Setup
-Navigate to the frontend directory:
-```bash
-cd frontend
-npm install
-```
-
-Configure environment variables in `frontend/.env.local`:
-```env
-NEXT_PUBLIC_API_URL=http://localhost:5000
-
-# Firebase Client SDK
-NEXT_PUBLIC_FIREBASE_API_KEY=AIzaSy...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=ghostguard-4db57.firebaseapp.com
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=ghostguard-4db57
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=ghostguard-4db57.firebasestorage.app
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=808611102393
-NEXT_PUBLIC_FIREBASE_APP_ID=1:808611102393:web:...
-NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-...
-```
-
-Start the Next.js development server:
-```bash
-npm run dev
-```
-
-Open `http://localhost:3000` in your browser.
-
-### 4. Chrome Extension Setup
-1. Open Google Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** using the toggle switch in the top right.
-3. Click **Load unpacked** in the top left.
-4. Select the `extension/` folder located inside the GhostGuard project.
-5. The GhostGuard icon will appear in your Chrome toolbar, synchronizing live telemetry with `http://localhost:5000`.
-
----
-
-## 🛡️ Remediation Engine
-
-When GhostGuard audits an account, it assigns one of the following remediation states, stored directly in Cloud Firestore:
-
-| Status | Label | Description | Action Triggered |
-| :--- | :--- | :--- | :--- |
-| `UNREVIEWED` | Needs Attention | Discovered asset pending user review. | Initial audit scan |
-| `KEPT` | Retained | Verified active service trusted by the user. | `POST /api/audit/action` -> `KEPT` |
-| `SECURED` | Secured | Credentials updated, 2FA enabled, or password changed. | `POST /api/audit/action` -> `SECURED` |
-| `REVOKED` | Revoked | Third-party access revoked via Google OAuth settings. | `POST /api/audit/action` -> `REVOKED` |
-| `DELETED` | Removed | Purged from threat directory and audit footprint. | `DELETE /api/audit/asset/:domain` |
-
----
-
-## 🔒 Security & Privacy Guarantees
-
-- **No Plaintext Passwords:** GhostGuard never collects, stores, transmits, or inspects passwords.
-- **Zero Raw Email Storage:** Gmail messages are evaluated ephemerally in-memory to detect authentication domains and discarded immediately.
-- **Secret Scanning Safeguards:** All service account keys, session tokens, and local cache databases are permanently ignored via `.gitignore` to prevent secret exposure.
-- **Multi-Tenant Isolation:** All database reads and writes are strictly scoped to the authenticated caller's Firebase `uid`.
+- **Zero Email Storage:** Email contents are processed ephemerally in-memory solely to isolate service domain receipts, then immediately dropped.
+- **Deterministic Action Bounds:** GhostAI functions strictly as an advisory copilot; destructive mutations, deletions, and revocations remain locked behind user confirmation.
+- **Leakage Prevention:** Service accounts, tokens, and active authentication session stores are barred from version control via `.gitignore`.
+- **Tenant Scoping:** All Firestore reads, updates, and batch deletions enforce identity validation mapped to the requester's Firebase ID token (`uid`).

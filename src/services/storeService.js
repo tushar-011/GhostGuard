@@ -123,19 +123,24 @@ async function getAccounts() {
  * @returns {Promise<{ totalDiscovered: number, highRiskCount: number, dormantCount: number, reviewedCount: number }>}
  */
 async function getAuditStats() {
-  const accounts = await getAccounts();
+  const store = await readStore();
+  const accounts = Object.values(store.accounts || {});
   const totalDiscovered = accounts.length;
   const highRiskCount = accounts.filter(
     (a) => (a.riskLevel && a.riskLevel.toUpperCase() === 'HIGH') || (typeof a.ghostScore === 'number' && a.ghostScore >= 70)
   ).length;
   const dormantCount = accounts.filter((a) => a.isDormant || (a.ageInMonths && a.ageInMonths >= 12)).length;
   const reviewedCount = accounts.filter((a) => a.status && a.status !== 'UNREVIEWED').length;
+  const decommissionedCount = accounts.filter((a) => a.status === 'MARKED_FOR_DELETION').length;
+  const deadManArmed = Boolean(store.deadManArmed || (totalDiscovered > 0 && decommissionedCount === totalDiscovered));
 
   return {
     totalDiscovered,
     highRiskCount,
     dormantCount,
-    reviewedCount
+    reviewedCount,
+    deadManArmed,
+    deadManArmedAt: store.deadManArmedAt || null,
   };
 }
 
@@ -242,9 +247,76 @@ async function updateAccountStatus(domain, status, notes = '') {
  */
 async function clearStore() {
   await ensureStoreInitialized();
-  const empty = { lastScanned: null, accounts: {} };
+  const empty = { lastScanned: null, accounts: {}, deadManArmed: false };
   await writeStore(empty);
   return empty;
+}
+
+/**
+ * Triggers the Dead Man's Switch emergency decommission across all local accounts
+ * @returns {Promise<{ count: number }>}
+ */
+async function triggerDeadManSwitchLocal() {
+  const store = await readStore();
+  const now = new Date().toISOString();
+  let count = 0;
+
+  for (const domainKey of Object.keys(store.accounts || {})) {
+    const acc = store.accounts[domainKey];
+    acc.previousStatus = acc.status || 'UNREVIEWED';
+    acc.status = 'MARKED_FOR_DELETION';
+    acc.decommissionTimestamp = now;
+    count++;
+  }
+
+  store.deadManArmed = true;
+  store.deadManArmedAt = now;
+  await writeStore(store);
+
+  return { count };
+}
+
+/**
+ * Disarms the Dead Man's Switch and reverts accounts to previous states
+ * @returns {Promise<{ count: number }>}
+ */
+async function disarmDeadManSwitchLocal() {
+  const store = await readStore();
+  const now = new Date().toISOString();
+  let count = 0;
+
+  for (const domainKey of Object.keys(store.accounts || {})) {
+    const acc = store.accounts[domainKey];
+    if (acc.status === 'MARKED_FOR_DELETION') {
+      acc.status = acc.previousStatus || 'KEPT';
+      acc.previousStatus = null;
+      acc.disarmedTimestamp = now;
+      count++;
+    }
+  }
+
+  store.deadManArmed = false;
+  store.deadManDisarmedAt = now;
+  await writeStore(store);
+
+  return { count };
+}
+
+/**
+ * Gets local Dead Man's Switch status
+ * @returns {Promise<{ armed: boolean, armedAt: string|null, decommissionedCount: number }>}
+ */
+async function getDeadManStatusLocal() {
+  const store = await readStore();
+  const accounts = Object.values(store.accounts || {});
+  const decommissionedCount = accounts.filter((a) => a.status === 'MARKED_FOR_DELETION').length;
+  const armed = Boolean(store.deadManArmed || (accounts.length > 0 && decommissionedCount === accounts.length));
+
+  return {
+    armed,
+    armedAt: store.deadManArmedAt || null,
+    decommissionedCount
+  };
 }
 
 module.exports = {
@@ -257,6 +329,9 @@ module.exports = {
   getAuditStats,
   updateAccountStatus,
   removeAccount,
-  clearStore
+  clearStore,
+  triggerDeadManSwitchLocal,
+  disarmDeadManSwitchLocal,
+  getDeadManStatusLocal
 };
 

@@ -459,6 +459,206 @@ async function hasUserConnectedGmail(uid) {
   }
 }
 
+/**
+ * 10. Retrieves audit logs for a user from users/{uid}/auditLogs
+ * @param {string} uid
+ * @param {number} [limit=50]
+ * @returns {Promise<Array<object>>}
+ */
+async function getUserAuditLogs(uid, limit = 50) {
+  assertFirebase();
+  if (!uid) throw new Error('User UID is required.');
+
+  try {
+    const snapshot = await db
+      .collection('users')
+      .doc(uid)
+      .collection('auditLogs')
+      .orderBy('timestamp', 'desc')
+      .limit(limit)
+      .get();
+
+    const logs = [];
+    snapshot.forEach((doc) => {
+      logs.push({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+
+    return logs;
+  } catch (err) {
+    // If orderBy without index fails or unindexed, fallback to un-ordered query
+    const snapshot = await db
+      .collection('users')
+      .doc(uid)
+      .collection('auditLogs')
+      .limit(limit)
+      .get();
+
+    const logs = [];
+    snapshot.forEach((doc) => {
+      logs.push({
+        id: doc.id,
+        ...doc.data(),
+      });
+    });
+
+    return logs.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  }
+}
+
+/**
+ * 11. Triggers Dead Man's Switch for a user in Firestore
+ * Bulk transitions all threats in users/{uid}/threats to status: "MARKED_FOR_DELETION"
+ * and records DEAD_MAN_SWITCH_TRIGGERED in users/{uid}/auditLogs
+ * @param {string} uid
+ * @returns {Promise<{ count: number }>}
+ */
+async function triggerDeadManSwitch(uid) {
+  assertFirebase();
+  if (!uid) throw new Error('User UID is required.');
+
+  const userRef = db.collection('users').doc(uid);
+  const threatsColl = userRef.collection('threats');
+  const snapshot = await threatsColl.get();
+  const now = new Date().toISOString();
+
+  let count = 0;
+  const batch = db.batch();
+
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    batch.update(doc.ref, {
+      previousStatus: data.status || 'UNREVIEWED',
+      status: 'MARKED_FOR_DELETION',
+      decommissionTimestamp: now,
+      updatedAt: now,
+    });
+    count++;
+  });
+
+  // Record audit log
+  const logId = `log_${Date.now()}_deadman_trigger`;
+  const logRef = userRef.collection('auditLogs').doc(logId);
+  batch.set(logRef, {
+    logId,
+    action: 'DEAD_MAN_SWITCH_TRIGGERED',
+    timestamp: now,
+    affectedCount: count,
+    details: 'Emergency digital perimeter purge initiated. All active accounts queued for deletion.',
+  });
+
+  // Update user document state
+  batch.set(
+    userRef,
+    {
+      deadManArmed: true,
+      deadManArmedAt: now,
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+  return { count };
+}
+
+/**
+ * 12. Disarms Dead Man's Switch for a user in Firestore
+ * Reverts MARKED_FOR_DELETION threats back to their previousStatus or 'KEPT'
+ * and records DEAD_MAN_SWITCH_DISARMED in users/{uid}/auditLogs
+ * @param {string} uid
+ * @returns {Promise<{ count: number }>}
+ */
+async function disarmDeadManSwitch(uid) {
+  assertFirebase();
+  if (!uid) throw new Error('User UID is required.');
+
+  const userRef = db.collection('users').doc(uid);
+  const threatsColl = userRef.collection('threats');
+  const snapshot = await threatsColl.get();
+  const now = new Date().toISOString();
+
+  let count = 0;
+  const batch = db.batch();
+
+  snapshot.forEach((doc) => {
+    const data = doc.data();
+    if (data.status === 'MARKED_FOR_DELETION') {
+      batch.update(doc.ref, {
+        status: data.previousStatus || 'KEPT',
+        previousStatus: null,
+        disarmedTimestamp: now,
+        updatedAt: now,
+      });
+      count++;
+    }
+  });
+
+  // Record audit log
+  const logId = `log_${Date.now()}_deadman_disarm`;
+  const logRef = userRef.collection('auditLogs').doc(logId);
+  batch.set(logRef, {
+    logId,
+    action: 'DEAD_MAN_SWITCH_DISARMED',
+    timestamp: now,
+    restoredCount: count,
+    details: 'Emergency purge aborted. Accounts restored to previous statuses.',
+  });
+
+  // Update user document state
+  batch.set(
+    userRef,
+    {
+      deadManArmed: false,
+      deadManDisarmedAt: now,
+      updatedAt: now,
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+  return { count };
+}
+
+/**
+ * 13. Gets Dead Man's Switch status for a user in Firestore
+ * @param {string} uid
+ * @returns {Promise<{ armed: boolean, armedAt: string|null, decommissionedCount: number }>}
+ */
+async function getDeadManStatus(uid) {
+  assertFirebase();
+  if (!uid) throw new Error('User UID is required.');
+
+  const userRef = db.collection('users').doc(uid);
+  const userDoc = await userRef.get();
+  const userData = userDoc.exists ? userDoc.data() : {};
+
+  const threatsColl = userRef.collection('threats');
+  const snapshot = await threatsColl.get();
+  let totalAccounts = 0;
+  let decommissionedCount = 0;
+
+  snapshot.forEach((doc) => {
+    totalAccounts++;
+    if (doc.data().status === 'MARKED_FOR_DELETION') {
+      decommissionedCount++;
+    }
+  });
+
+  const armed = Boolean(
+    userData.deadManArmed ||
+    (totalAccounts > 0 && decommissionedCount === totalAccounts)
+  );
+
+  return {
+    armed,
+    armedAt: userData.deadManArmedAt || null,
+    decommissionedCount,
+  };
+}
+
 module.exports = {
   sanitizeDocId,
   upsertUserProfile,
@@ -470,5 +670,9 @@ module.exports = {
   saveUserConnectedAccount,
   getUserConnectedAccount,
   hasUserConnectedGmail,
+  getUserAuditLogs,
+  triggerDeadManSwitch,
+  disarmDeadManSwitch,
+  getDeadManStatus,
 };
 

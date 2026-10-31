@@ -210,6 +210,79 @@ export const auditApi = {
       method: 'POST',
     });
   },
+
+  /**
+   * Fetches audit and remediation lifecycle logs
+   * @returns {Promise<{ success: boolean, count: number, logs: Array<any> }>}
+   */
+  getLogs: async () => {
+    return fetchApi('/api/audit/logs');
+  },
+
+  /**
+   * Fetches data breach exposures and threat intelligence
+   * @param {object} [params]
+   * @param {string} [params.email]
+   * @param {boolean} [params.all]
+   * @returns {Promise<{ success: boolean, email: string, totalBreaches: number, riskGrade: string, breaches: Array<any>, allBreaches?: Array<any> }>}
+   */
+  getBreaches: async ({ email, all } = {}) => {
+    const params = new URLSearchParams();
+    if (email) params.append('email', email);
+    if (all) params.append('all', 'true');
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return fetchApi(`/api/audit/breaches${query}`);
+  },
+
+  /**
+   * Checks k-anonymity password hash prefix against HIBP database
+   * @param {string} hashPrefix
+   * @param {string} [hashSuffix]
+   * @returns {Promise<{ success: boolean, prefix: string, isExposed: boolean, pwnedCount: number }>}
+   */
+  /**
+   * Queries GhostAI Security Copilot for grounded posture analysis
+   * @param {string} message
+   * @param {Array<{ role: string, content: string }>} [conversationHistory=[]]
+   * @returns {Promise<{ success: boolean, reply: string, engine?: string }>}
+   */
+  askGhostAI: async (message, conversationHistory = []) => {
+    return fetchApi('/api/audit/ghost-ai', {
+      method: 'POST',
+      body: JSON.stringify({ message, conversationHistory }),
+    });
+  },
+
+  /**
+   * Triggers emergency Dead Man's Switch (Emergency Digital Perimeter Purge)
+   * @param {object} [params]
+   * @param {string} [params.confirmation='PURGE']
+   * @returns {Promise<{ success: boolean, armed: boolean, count: number, message: string }>}
+   */
+  triggerDeadManSwitch: async ({ confirmation = 'PURGE' } = {}) => {
+    return fetchApi('/api/audit/dead-man-switch/trigger', {
+      method: 'POST',
+      body: JSON.stringify({ confirmation }),
+    });
+  },
+
+  /**
+   * Disarms Dead Man's Switch and restores accounts
+   * @returns {Promise<{ success: boolean, armed: boolean, count: number, message: string }>}
+   */
+  disarmDeadManSwitch: async () => {
+    return fetchApi('/api/audit/dead-man-switch/disarm', {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * Retrieves current Dead Man's Switch state
+   * @returns {Promise<{ success: boolean, armed: boolean, armedAt: string|null, decommissionedCount: number }>}
+   */
+  getDeadManSwitchStatus: async () => {
+    return fetchApi('/api/audit/dead-man-switch/status');
+  },
 };
 
 const api = {

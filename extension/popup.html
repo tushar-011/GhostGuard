@@ -27,7 +27,7 @@
         </div>
         <div class="brand-info">
           <h1 class="brand-title">GhostGuard</h1>
-          <span class="brand-subtitle">ORPHANED ASSET &amp; PERIMETER AUDITOR</span>
+          <span class="brand-subtitle">DIGITAL PERIMETER DEFENDER</span>
         </div>
       </div>
 
@@ -40,6 +40,41 @@
         <span id="statusText">Connecting...</span>
       </div>
     </header>
+
+    <!-- Module 1: Live Tab Perimeter & Ghost Account Detection -->
+    <section id="activePerimeterCard" class="perimeter-card">
+      <div class="perimeter-header">
+        <div class="perimeter-status-wrap">
+          <span id="perimeterDot" class="perimeter-dot neutral"></span>
+          <span id="perimeterStatusText" class="perimeter-status-title">SCANNING PERIMETER...</span>
+        </div>
+        <span id="perimeterDomainBadge" class="perimeter-domain-badge">Checking tab...</span>
+      </div>
+
+      <div id="perimeterContent" class="perimeter-content">
+        <!-- Rendered dynamically by popup.js -->
+        <div class="perimeter-loading">
+          <span class="spinner-sm"></span>
+          <span>Inspecting active tab security context...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Module 5: Offline Alert Card (Shown when backend cannot be reached) -->
+    <div id="offlineAlertCard" class="offline-card hidden">
+      <div class="offline-icon">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <div class="offline-text">
+        <strong>GhostGuard Engine Offline</strong>
+        <p>Could not connect to http://localhost:5000. Start backend to sync live telemetry.</p>
+      </div>
+      <button id="btnRetryConnection" class="btn-retry" title="Retry connection">Retry</button>
+    </div>
 
     <!-- User Identifier Banner (Visible when logged in) -->
     <div id="userBanner" class="user-banner hidden">
@@ -150,11 +185,31 @@
       </div>
     </section>
 
+    <!-- Module 4: 1-Click Footprint Export & Security Bar -->
+    <section class="quick-tools-bar">
+      <button id="btnExportReport" class="btn-tool" title="Export audit footprint report as JSON">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span id="exportBtnText">Export Footprint</span>
+      </button>
+
+      <button id="btnLiveSync" class="btn-tool" title="Live sync inbox telemetry without leaving popup">
+        <svg id="liveSyncIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+        </svg>
+        <span id="liveSyncSpinner" class="spinner-sm hidden"></span>
+        <span id="liveSyncText">Live Sync</span>
+      </button>
+    </section>
+
     <!-- Footer -->
     <footer class="footer">
       <div class="footer-left">
         <span class="footer-pulse"></span>
-        <span class="footer-meta">GhostGuard v1.0 • Connected to localhost:5000</span>
+        <span id="footerMetaText" class="footer-meta">GhostGuard v1.1 • Perimeter Active</span>
       </div>
       <button id="btnRefresh" class="footer-btn" title="Refresh local telemetry">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Activity,
+  AlertOctagon,
   AlertTriangle,
   ArrowRight,
   BarChart3,
@@ -28,12 +29,15 @@ import {
   LogOut,
   Mail,
   Menu,
+  Milestone,
+  Clock,
   Network,
   Plus,
   RefreshCw,
   Search,
   Settings,
   Shield,
+  ShieldAlert,
   ShieldCheck,
   Sparkles,
   Sun,
@@ -47,6 +51,8 @@ import {
 import { useEffect, useState, useRef, createContext, useContext } from "react";
 import DottedIdentityGlobe from "@/components/DottedIdentityGlobe";
 import CategorizedFootprintDirectory from "@/components/CategorizedFootprintDirectory";
+import GhostAICopilot from "@/components/GhostAICopilot";
+import DeadManAuthModal from "@/components/DeadManAuthModal";
 import api, { authApi, auditApi, API_BASE_URL } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { auth } from "@/lib/firebase";
@@ -137,6 +143,8 @@ const dashboardNav = [
   { href: "/dashboard", label: "Overview", icon: BarChart3 },
   { href: "/dashboard/accounts", label: "All accounts", icon: Grid2X2 },
   { href: "/dashboard/identity-map", label: "Identity directory", icon: Network },
+  { href: "/dashboard/timeline", label: "Timeline", icon: Milestone },
+  { href: "/dashboard/breachwatch", label: "BreachWatch", icon: ShieldAlert },
   { href: "/dashboard/security", label: "Security", icon: ShieldCheck },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
@@ -176,10 +184,14 @@ export const GhostGuardContext = createContext({
   stats: null,
   assets: [],
   graph: null,
+  deadManArmed: false,
+  deadManArmedAt: null,
   refreshData: async () => {},
   scanInbox: async () => {},
   updateAccountStatus: async () => {},
   removeAccount: async () => {},
+  triggerDeadManSwitch: async () => {},
+  disarmDeadManSwitch: async () => {},
   logout: async () => {},
 });
 
@@ -215,6 +227,8 @@ export function GhostGuardProvider({ children }) {
   const [stats, setStats] = useState(null);
   const [assets, setAssets] = useState([]);
   const [graph, setGraph] = useState(null);
+  const [deadManArmed, setDeadManArmed] = useState(false);
+  const [deadManArmedAt, setDeadManArmedAt] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -339,6 +353,12 @@ export function GhostGuardProvider({ children }) {
         const s = statsRes?.stats || statsRes;
         if (s) {
           setStats(s);
+          if (s.deadManArmed !== undefined) {
+            setDeadManArmed(Boolean(s.deadManArmed));
+          }
+          if (s.deadManArmedAt !== undefined) {
+            setDeadManArmedAt(s.deadManArmedAt);
+          }
           const total = s.totalDiscovered ?? currentAssets.length;
           setScanMessage(`Discovered ${total} registered accounts.`);
         } else if (currentAssets.length > 0) {
@@ -375,7 +395,15 @@ export function GhostGuardProvider({ children }) {
 
         const statsRes = await auditApi.getStats();
         const s = statsRes?.stats || statsRes;
-        if (s) setStats(s);
+        if (s) {
+          setStats(s);
+          if (s.deadManArmed !== undefined) {
+            setDeadManArmed(Boolean(s.deadManArmed));
+          }
+          if (s.deadManArmedAt !== undefined) {
+            setDeadManArmedAt(s.deadManArmedAt);
+          }
+        }
 
         const totalAccounts = s?.totalDiscovered ?? scanRes.assets.length;
         setScanMessage(`Scan complete: Discovered ${totalAccounts} registered accounts.`);
@@ -437,6 +465,60 @@ export function GhostGuardProvider({ children }) {
     }
   }
 
+  async function triggerDeadManSwitch(params = { confirmation: 'PURGE' }) {
+    try {
+      const res = await auditApi.triggerDeadManSwitch(params);
+      setDeadManArmed(true);
+      setDeadManArmedAt(new Date().toISOString());
+      setAssets((prev) =>
+        prev.map((acc) => ({
+          ...acc,
+          previousStatus: acc.status || "UNREVIEWED",
+          status: "MARKED_FOR_DELETION",
+          rawStatus: "MARKED_FOR_DELETION",
+        }))
+      );
+      try {
+        const statsRes = await auditApi.getStats();
+        const s = statsRes?.stats || statsRes;
+        if (s) {
+          setStats(s);
+          if (s.deadManArmed !== undefined) setDeadManArmed(Boolean(s.deadManArmed));
+        }
+      } catch {}
+      return res;
+    } catch (err) {
+      console.error("Failed triggering Dead Man's Switch:", err);
+      throw err;
+    }
+  }
+
+  async function disarmDeadManSwitch() {
+    try {
+      const res = await auditApi.disarmDeadManSwitch();
+      setDeadManArmed(false);
+      setDeadManArmedAt(null);
+      try {
+        const accountsRes = await auditApi.getAccounts();
+        if (accountsRes && accountsRes.assets) {
+          setAssets(accountsRes.assets);
+        }
+      } catch {}
+      try {
+        const statsRes = await auditApi.getStats();
+        const s = statsRes?.stats || statsRes;
+        if (s) {
+          setStats(s);
+          if (s.deadManArmed !== undefined) setDeadManArmed(Boolean(s.deadManArmed));
+        }
+      } catch {}
+      return res;
+    } catch (err) {
+      console.error("Failed disarming Dead Man's Switch:", err);
+      throw err;
+    }
+  }
+
   async function logout() {
     try {
       if (auth && typeof auth.signOut === "function") {
@@ -479,6 +561,10 @@ export function GhostGuardProvider({ children }) {
         scanInbox,
         updateAccountStatus,
         removeAccount,
+        deadManArmed,
+        deadManArmedAt,
+        triggerDeadManSwitch,
+        disarmDeadManSwitch,
         logout,
       }}
     >
@@ -922,7 +1008,19 @@ export function DashboardShell({ children, title, description }) {
   const pathname = usePathname();
   const [mobile, setMobile] = useState(false);
   const [query, setQuery] = useState("");
-  const { isLive, userEmail, userName, logout, assets, stats } = useGhostGuard();
+  const { isLive, userEmail, userName, logout, assets, stats, deadManArmed, disarmDeadManSwitch } = useGhostGuard();
+  const [disarming, setDisarming] = useState(false);
+
+  const handleDisarm = async () => {
+    setDisarming(true);
+    try {
+      await disarmDeadManSwitch();
+    } catch (err) {
+      alert("Failed to disarm Dead Man's Switch: " + (err.message || "Unknown error"));
+    } finally {
+      setDisarming(false);
+    }
+  };
 
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
@@ -1139,6 +1237,62 @@ export function DashboardShell({ children, title, description }) {
         <button className="sidebar-overlay mobile-only" onClick={() => setMobile(false)} aria-label="Close sidebar" />
       )}
       <div className="dashboard-content">
+        {deadManArmed && (
+          <div
+            role="alert"
+            className="dead-man-switch-banner"
+            style={{
+              backgroundColor: "rgba(127, 29, 29, 0.95)",
+              borderBottom: "1px solid #ef4444",
+              color: "#fecaca",
+              padding: "10px 24px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: "12px",
+              zIndex: 100,
+              boxShadow: "0 4px 20px rgba(239, 68, 68, 0.25)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <AlertTriangle size={18} style={{ color: "#ef4444", flexShrink: 0 }} />
+              <span style={{ fontSize: "13px", fontWeight: 700, letterSpacing: "0.2px" }}>
+                ⚠️ DEAD MAN&apos;S SWITCH ACTIVE: All {stats?.totalDiscovered || assets?.length || 0} accounts queued for deletion.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleDisarm}
+              disabled={disarming}
+              style={{
+                backgroundColor: "#b91c1c",
+                border: "1px solid #f87171",
+                color: "#ffffff",
+                padding: "6px 14px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: 700,
+                cursor: disarming ? "wait" : "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 0 10px rgba(239, 68, 68, 0.4)",
+                transition: "all 0.15s ease",
+              }}
+            >
+              {disarming ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin" /> Disarming...
+                </>
+              ) : (
+                <>
+                  <ShieldAlert size={14} /> Disarm Protocol
+                </>
+              )}
+            </button>
+          </div>
+        )}
         <header className="dashboard-header">
           <button className="icon-button mobile-only" onClick={() => setMobile(true)} aria-label="Open dashboard menu">
             <Menu />
@@ -1534,6 +1688,7 @@ export function DashboardShell({ children, title, description }) {
           </div>
         </header>
         <main className="dashboard-main">{children}</main>
+        <GhostAICopilot />
       </div>
     </div>
   );
@@ -1623,13 +1778,11 @@ export function DashboardPage() {
     stats: contextStats,
     assets: contextAssets,
     scanInbox,
-    sessionExpired: contextSessionExpired,
   } = useGhostGuard();
 
   const [localStats, setLocalStats] = useState(null);
   const [localAssets, setLocalAssets] = useState([]);
   const [localLoading, setLocalLoading] = useState(false);
-  const [localSessionExpired, setLocalSessionExpired] = useState(false);
   const [localEmail, setLocalEmail] = useState("");
 
   const isLiveEffective = contextIsLive || (typeof window !== "undefined" && (
@@ -1668,11 +1821,9 @@ export function DashboardPage() {
           const scanRes = await auditApi.scan();
           if (active && scanRes?.assets) {
             setLocalAssets(scanRes.assets);
-            setLocalSessionExpired(false);
           }
         } catch (scanErr) {
           if (scanErr.status === 401) {
-            if (active) setLocalSessionExpired(true);
             try {
               const accRes = await auditApi.getAccounts();
               if (active && accRes?.assets && accRes.assets.length > 0) {
@@ -1689,9 +1840,7 @@ export function DashboardPage() {
             setLocalStats(statsRes.stats);
           }
         } catch (statsErr) {
-          if (statsErr.status === 401 && active) {
-            setLocalSessionExpired(true);
-          }
+          // stats error handling
         }
       } catch (err) {
         console.warn("Dashboard on-mount fetch error:", err);
@@ -1710,7 +1859,6 @@ export function DashboardPage() {
   const stats = contextStats || localStats;
   const assets = (contextAssets && contextAssets.length > 0) ? contextAssets : localAssets;
   const loading = contextLoading || localLoading;
-  const sessionExpired = localSessionExpired || contextSessionExpired;
   const activeEmail = localEmail || contextUserEmail || (typeof window !== "undefined" ? window.localStorage.getItem("ghostguard_email") : "") || "";
 
   // 1. Metric Card 1: totalDiscovered (Total accounts)
@@ -1745,70 +1893,6 @@ export function DashboardPage() {
   return (
     <DashboardShell title="Overview" description="Real-time audit and posture of your digital identity.">
       {!isLiveEffective && <DemoBanner />}
-
-      {/* Dashboard Fallback Guard: Prompt user to connect Gmail inbox if unlinked, empty, or expired */}
-      {(sessionExpired || (!loading && isLiveEffective && (totalCount === 0 || (!stats?.hasGmail && !stats?.connectedGmail)))) && (
-        <div style={{
-          background: "linear-gradient(135deg, rgba(20, 36, 26, 0.96) 0%, rgba(14, 26, 19, 0.96) 100%)",
-          border: "1px solid rgba(74, 222, 128, 0.35)",
-          borderRadius: "14px",
-          padding: "18px 24px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "24px",
-          flexWrap: "wrap",
-          gap: "16px",
-          boxShadow: "0 6px 24px rgba(0, 0, 0, 0.35)"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-            <div style={{
-              width: "46px",
-              height: "46px",
-              borderRadius: "12px",
-              background: "rgba(74, 222, 128, 0.15)",
-              border: "1px solid rgba(74, 222, 128, 0.3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#4ade80",
-              flexShrink: 0
-            }}>
-              <Mail size={22} />
-            </div>
-            <div>
-              <strong style={{ display: "block", color: "#f1f5ee", fontSize: "14.5px", fontWeight: "600", marginBottom: "4px" }}>
-                Connect your Gmail inbox to discover orphaned accounts and generate your digital footprint.
-              </strong>
-              <span style={{ color: "#9bb89e", fontSize: "12.5px" }}>
-                GhostGuard performs a secure, read-only audit across account confirmation emails to map active services and compute risk telemetry.
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              const currentUid = auth?.currentUser?.uid || '';
-              window.location.href = `${API_BASE_URL}/auth/google${currentUid ? `?uid=${encodeURIComponent(currentUid)}` : ''}`;
-            }}
-            className="button button-primary"
-            style={{
-              padding: "10px 20px",
-              fontSize: "13.5px",
-              fontWeight: "600",
-              whiteSpace: "nowrap",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              borderRadius: "10px",
-              background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
-              color: "#0a1f14",
-              boxShadow: "0 2px 12px rgba(16, 185, 129, 0.35)"
-            }}
-          >
-            ✦ Connect Gmail Inbox
-          </button>
-        </div>
-      )}
 
       {loading && (
         <div style={{ background: "rgba(34, 211, 238, 0.08)", border: "1px solid rgba(34, 211, 238, 0.25)", borderRadius: "12px", padding: "16px 20px", marginBottom: "20px", display: "flex", alignItems: "center", gap: "12px", color: "var(--cyan)" }}>
@@ -2659,7 +2743,24 @@ export { CategorizedFootprintDirectory };
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
-  const { isLive, userEmail, userName, assets, refreshData, logout } = useGhostGuard();
+  const { isLive, userEmail, userName, assets, refreshData, logout, deadManArmed, triggerDeadManSwitch, disarmDeadManSwitch } = useGhostGuard();
+  const [isDeadManModalOpen, setIsDeadManModalOpen] = useState(false);
+  const [disarmingSwitch, setDisarmingSwitch] = useState(false);
+
+  const handleArmDeadMan = async ({ confirmation, password }) => {
+    await triggerDeadManSwitch({ confirmation });
+  };
+
+  const handleDisarmSwitch = async () => {
+    setDisarmingSwitch(true);
+    try {
+      await disarmDeadManSwitch();
+    } catch (err) {
+      alert("Failed to disarm Dead Man's Switch: " + (err.message || "Unknown error"));
+    } finally {
+      setDisarmingSwitch(false);
+    }
+  };
 
   const isLiveEffective = isLive || (typeof window !== "undefined" && (
     new URLSearchParams(window.location.search).get("auth") === "success" ||
@@ -3378,11 +3479,99 @@ export function SettingsPage() {
                     <LogOut size={14} /> Disconnect Google Account
                   </button>
                 </div>
+
+                {/* Emergency Protocol: Dead Man's Switch */}
+                <div
+                  className="settings-card-row"
+                  style={{
+                    borderColor: deadManArmed ? "rgba(239, 68, 68, 0.7)" : "rgba(239, 68, 68, 0.35)",
+                    background: deadManArmed ? "rgba(127, 29, 29, 0.25)" : "rgba(127, 29, 29, 0.08)",
+                    borderRadius: "10px",
+                    padding: "16px",
+                    marginTop: "12px",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: "260px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                      <AlertOctagon size={16} style={{ color: "#ef4444" }} />
+                      <strong style={{ fontSize: "14px", color: "#fca5a5" }}>
+                        Emergency Protocol: Dead Man&apos;s Switch
+                      </strong>
+                      {deadManArmed && (
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "9999px",
+                            background: "#ef4444",
+                            color: "#ffffff",
+                            letterSpacing: "0.5px",
+                          }}
+                        >
+                          ARMED
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: "12px", color: "#94a3b8", display: "block", lineHeight: "1.5" }}>
+                      Autonomous digital footprint purge. In a critical perimeter compromise, arms emergency decommissioning to mark all {assets?.length || 0} discovered accounts for deletion (<code style={{ color: "#f87171" }}>MARKED_FOR_DELETION</code>). Strictly requires re-authentication.
+                    </span>
+                  </div>
+                  <div style={{ flexShrink: 0 }}>
+                    {deadManArmed ? (
+                      <button
+                        type="button"
+                        onClick={handleDisarmSwitch}
+                        disabled={disarmingSwitch}
+                        className="button"
+                        style={{
+                          background: "#b91c1c",
+                          border: "1px solid #ef4444",
+                          color: "#ffffff",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          padding: "8px 16px",
+                          minHeight: "36px",
+                          boxShadow: "0 0 12px rgba(239, 68, 68, 0.4)",
+                          cursor: disarmingSwitch ? "wait" : "pointer",
+                        }}
+                      >
+                        <ShieldAlert size={14} />
+                        {disarmingSwitch ? "Disarming..." : "Disarm Protocol"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setIsDeadManModalOpen(true)}
+                        className="button"
+                        style={{
+                          background: "rgba(239, 68, 68, 0.15)",
+                          border: "1px solid rgba(239, 68, 68, 0.5)",
+                          color: "#fca5a5",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          padding: "8px 16px",
+                          minHeight: "36px",
+                          cursor: "pointer",
+                          transition: "all 0.15s ease",
+                        }}
+                      >
+                        <AlertOctagon size={14} /> ⚠️ Arm Dead Man&apos;s Switch
+                      </button>
+                    )}
+                  </div>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </div>
+      <DeadManAuthModal
+        isOpen={isDeadManModalOpen}
+        onClose={() => setIsDeadManModalOpen(false)}
+        onArmed={handleArmDeadMan}
+        accountCount={assets?.length || 0}
+      />
     </DashboardShell>
   );
 }
@@ -3424,3 +3613,8 @@ function ToggleSwitch({ checked, onChange, id, label }) {
     </button>
   );
 }
+
+import DigitalFootprintTimeline from "./DigitalFootprintTimeline";
+import BreachWatch from "./BreachWatch";
+export { DigitalFootprintTimeline, DigitalFootprintTimeline as TimelinePage, BreachWatch, BreachWatch as BreachWatchPage, GhostAICopilot };
+

@@ -147,6 +147,8 @@ async function saveAuditScan(uid, scanResults = [], stats = {}) {
         remediationTip: asset.remediationTip || '',
         snippet: asset.snippet || '',
         firstDiscoveredEmail: asset.firstDiscoveredEmail || '',
+        authMethod: asset.authMethod || existing?.authMethod || 'Direct Registration',
+        details: asset.details || existing?.details || '',
         lastScannedAt: now,
       };
 

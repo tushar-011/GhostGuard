@@ -128,6 +128,8 @@ function mapBackendAssetToAccount(asset, index) {
     remediationTip: asset.remediationTip || "Audit account permissions and revoke unused sessions.",
     snippet: asset.snippet || "",
     detectedDate: asset.detectedDate || "",
+    authMethod: asset.authMethod || (asset.details?.includes("Google Single Sign-On") ? "Google OAuth SSO" : "Direct Registration"),
+    details: asset.details || "",
     isLive: true
   };
 }
@@ -2635,6 +2637,33 @@ function AccountDetail({ account, onClose, onDelete, onUpdateStatus }) {
           {account.status}
         </span>
       </div>
+
+      {account.authMethod && (
+        <div style={{ margin: "10px 0 2px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "5px",
+              padding: "4px 10px",
+              borderRadius: "9999px",
+              fontSize: "11px",
+              fontWeight: 700,
+              background: account.authMethod.includes("Google") ? "rgba(66, 133, 244, 0.16)" : "rgba(74, 222, 128, 0.12)",
+              color: account.authMethod.includes("Google") ? "#93c5fd" : "#86efac",
+              border: account.authMethod.includes("Google") ? "1px solid rgba(66, 133, 244, 0.35)" : "1px solid rgba(74, 222, 128, 0.25)",
+            }}
+          >
+            {account.authMethod.includes("Google") ? "🔗 " : "🔑 "}
+            Auth: {account.authMethod}
+          </span>
+          {account.details && (
+            <span style={{ fontSize: "11.5px", color: "var(--muted)" }}>
+              {account.details}
+            </span>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", margin: "14px 0", padding: "12px", background: "var(--surface-strong)", borderRadius: "10px" }}>
         <div>

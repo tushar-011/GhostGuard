@@ -40,8 +40,29 @@ app.get('/', (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`GhostGuard server running at http://localhost:${PORT}`);
+const HOST = '0.0.0.0';
+
+const server = app.listen(PORT, HOST, () => {
+  console.log(`[GhostGuard Server] Active and listening on http://localhost:${PORT} (bound to ${HOST})`);
+});
+
+// Handle port collision or binding failures cleanly
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[GhostGuard Server] Error: Port ${PORT} is already occupied by another process.`);
+  } else {
+    console.error('[GhostGuard Server] Startup error:', err);
+  }
+  process.exit(1);
+});
+
+// Global process-level error traps to prevent Node crashes
+process.on('uncaughtException', (err) => {
+  console.error('[GhostGuard Server] Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[GhostGuard Server] Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 app.server = server;

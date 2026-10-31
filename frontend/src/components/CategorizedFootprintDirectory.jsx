@@ -300,7 +300,27 @@ const DEMO_FALLBACK_ACCOUNTS = [
 ];
 
 /**
- * Service Favicon with fallback initials
+ * Sanitizes domain inputs into clean hostnames without protocol, query, path, or port.
+ * @param {string} input
+ * @returns {string}
+ */
+export function getCleanHostname(input) {
+  if (!input || typeof input !== "string") return "globe";
+  try {
+    // Remove protocol, query strings, and trailing slashes
+    let domain = input.trim().replace(/^https?:\/\//i, "").split("/")[0].split("?")[0];
+    // Remove port numbers if present
+    domain = domain.split(":")[0];
+    // Fallback if the extracted domain is invalid or blank
+    if (!domain || !domain.includes(".")) return "globe";
+    return domain.toLowerCase();
+  } catch (e) {
+    return "globe";
+  }
+}
+
+/**
+ * Service Favicon with fallback initials and crash/404 protection
  */
 function ServiceAvatar({ domain, serviceName, categoryColor }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -313,7 +333,10 @@ function ServiceAvatar({ domain, serviceName, categoryColor }) {
     return raw.slice(0, 2).toUpperCase();
   }, [serviceName, domain]);
 
-  const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=64` : "";
+  const cleanDomain = getCleanHostname(domain);
+  const faviconUrl = cleanDomain !== "globe"
+    ? `https://www.google.com/s2/favicons?domain=${cleanDomain}&sz=64`
+    : null;
 
   return (
     <div
@@ -334,11 +357,14 @@ function ServiceAvatar({ domain, serviceName, categoryColor }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={faviconUrl}
-          alt={serviceName || domain}
+          alt={serviceName || domain || "Service"}
           width={20}
           height={20}
           style={{ width: "20px", height: "20px", objectFit: "contain" }}
-          onError={() => setImgFailed(true)}
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            setImgFailed(true);
+          }}
         />
       ) : (
         <span

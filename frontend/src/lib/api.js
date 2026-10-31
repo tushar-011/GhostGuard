@@ -9,13 +9,34 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
 
 /**
- * Common fetch helper with JSON parsing and standardized error handling
+ * Sanitizes domain inputs into clean hostnames without protocol, query, path, or port.
+ * @param {string} input
+ * @returns {string}
+ */
+export function getCleanHostname(input) {
+  if (!input || typeof input !== 'string') return 'globe';
+  try {
+    // Remove protocol, query strings, and trailing slashes
+    let domain = input.trim().replace(/^https?:\/\//i, '').split('/')[0].split('?')[0];
+    // Remove port numbers if present
+    domain = domain.split(':')[0];
+    // Fallback if the extracted domain is invalid or blank
+    if (!domain || !domain.includes('.')) return 'globe';
+    return domain.toLowerCase();
+  } catch (e) {
+    return 'globe';
+  }
+}
+
+/**
+ * Common fetch helper with JSON parsing, standardized error handling, and local cache fallback
  * @param {string} endpoint
  * @param {RequestInit} [options={}]
  * @returns {Promise<any>}
  */
-async function fetchApi(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
+export async function fetchApi(endpoint, options = {}) {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+  const url = `${baseUrl}${endpoint}`;
 
   // Automatically attach Firebase ID token if available
   const headers = {
@@ -55,30 +76,46 @@ async function fetchApi(endpoint, options = {}) {
   };
 
   try {
-    const response = await fetch(url, config);
+    const res = await fetch(url, config);
 
     // Parse JSON body if present
     let data;
-    const contentType = response.headers.get('content-type');
+    const contentType = res.headers.get('content-type');
     if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
+      data = await res.json();
     } else {
-      data = await response.text();
+      data = await res.text();
     }
 
-    if (!response.ok) {
+    if (!res.ok) {
       const error = new Error(
-        (data && data.message) || (data && data.error) || `Request failed with status ${response.status}`
+        (data && data.message) || (data && data.error) || `HTTP ${res.status}`
       );
-      error.status = response.status;
+      error.status = res.status;
       error.data = data;
       throw error;
     }
 
+    // Cache valid scan and stats responses locally for offline/connection resilience
+    if (typeof window !== 'undefined' && (endpoint.includes('/api/audit/scan') || endpoint.includes('/api/audit/stats') || endpoint.includes('/api/audit/accounts'))) {
+      try {
+        localStorage.setItem(`cache_${endpoint}`, JSON.stringify(data));
+      } catch {}
+    }
+
     return data;
   } catch (err) {
+    console.warn(`[GhostGuard API] Connection failed for ${endpoint}. Falling back to cached state if available.`, err);
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem(`cache_${endpoint}`);
+        if (cached) {
+          return JSON.parse(cached);
+        }
+      } catch {}
+    }
     if (err.name === 'TypeError' && err.message.includes('fetch')) {
-      const networkError = new Error(`Cannot connect to GhostGuard backend at ${API_BASE_URL}. Ensure the server is running on port 5000.`);
+      const networkError = new Error(`Cannot connect to GhostGuard backend at ${baseUrl}. Ensure the server is running on port 5000.`);
       networkError.status = 0;
       throw networkError;
     }

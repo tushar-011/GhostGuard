@@ -1,17 +1,22 @@
 const { google } = require('googleapis');
 
 /**
+ * Expanded Gmail search query to capture direct signups and Google OAuth third-party sharing alerts
+ */
+const GMAIL_SEARCH_QUERY = [
+  'subject:("welcome" OR "verify" OR "confirm your account" OR "activate" OR "registration" OR "getting started" OR "You shared some Google Account data with" OR "was granted access to your Google Account")',
+  'OR from:noreply-accounts@google.com ("You shared some Google Account data with" OR "used Sign in with Google to sign in to" OR "granted access")'
+].join(' ');
+
+/**
  * Searches and fetches messages matching registration/welcome patterns
  */
 async function fetchAccountDiscoveryEmails(authClient) {
   const gmail = google.gmail({ version: 'v1', auth: authClient });
 
-  // Targeted query to catch account activations, welcome emails, and verifications
-  const searchQuery = 'subject:("welcome" OR "verify your email" OR "confirm your account" OR "registration" OR "thanks for signing up" OR "activate your account")';
-
   const response = await gmail.users.messages.list({
     userId: 'me',
-    q: searchQuery,
+    q: GMAIL_SEARCH_QUERY,
     maxResults: 200
   });
 
@@ -51,4 +56,7 @@ async function fetchAccountDiscoveryEmails(authClient) {
   return emailDetails.filter(Boolean);
 }
 
-module.exports = { fetchAccountDiscoveryEmails };
+module.exports = {
+  GMAIL_SEARCH_QUERY,
+  fetchAccountDiscoveryEmails,
+};

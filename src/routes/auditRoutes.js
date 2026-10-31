@@ -81,6 +81,13 @@ function getMockRawEmails() {
       subject: 'Welcome to Spotify!',
       date: 'Sun, 04 Jun 2023 12:05:00 GMT',
       snippet: 'Thanks for signing up! Start listening to millions of songs.'
+    },
+    {
+      id: 'mock-10',
+      from: 'Google <noreply-accounts@google.com>',
+      subject: 'You shared some Google Account data with Reddit',
+      date: 'Tue, 19 Mar 2024 15:00:00 GMT',
+      snippet: 'You recently used Sign in with Google to sign in to Reddit. You can manage data sharing anytime in your Google Account.'
     }
   ];
 }
